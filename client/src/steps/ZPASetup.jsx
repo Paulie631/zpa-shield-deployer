@@ -15,7 +15,8 @@ export default function ZPASetup({ data, update, next, back }) {
   const isAWS = data.target === 'aws'
 
   // Data from API
-  const [customerId, setCustomerId]           = useState(data.customerId || '')
+  const [customerId, setCustomerId] = useState(data.customerId || '')
+  const [customerIdInput, setCustomerIdInput] = useState(data.customerId || '')
   const [connectorGroups, setConnectorGroups] = useState(data.connectorGroups || [])
   const [serverGroups, setServerGroups]       = useState([])
   const [enrollmentCerts, setEnrollmentCerts] = useState([])
@@ -50,13 +51,16 @@ export default function ZPASetup({ data, update, next, back }) {
     setLoadingData(true); setLoadError('')
     try {
       // First get customerId if we don't have it
-      let cid = customerId
+      let cid = customerId || customerIdInput
       if (!cid) {
         try {
           const custRes = await axios.get('/api/zpa/customer', { params: authParams })
-          cid = custRes.data?.id || custRes.data?.customerId || custRes.data?.[0]?.id || ''
+          cid = custRes.data?.id || ''
           setCustomerId(cid)
-        } catch { /* customerId optional for some auth modes */ }
+          setCustomerIdInput(cid)
+        } catch { /* customerId optional — routes fall back to base path */ }
+      } else {
+        setCustomerId(cid)
       }
 
       const params = { ...authParams, customerId: cid }
@@ -176,6 +180,18 @@ export default function ZPASetup({ data, update, next, back }) {
           <button onClick={loadAll} style={{ marginLeft: '10px', fontSize: '12px', padding: '2px 8px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: 'none' }}>Retry</button>
         </div>
       )}
+
+      {/* Customer ID — needed for mgmtconfig API calls */}
+      <div className="form-group">
+        <label>ZPA Customer ID</label>
+        <input type="text"
+          placeholder="e.g. aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d"
+          value={customerIdInput}
+          onChange={e => setCustomerIdInput(e.target.value.trim())}
+          onBlur={e => { setCustomerId(e.target.value.trim()); if (e.target.value.trim()) loadAll(); }}
+        />
+        <div className="hint">Found in Zidentity: your Tenant ID is your Customer ID. For your account: <strong>aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d</strong></div>
+      </div>
       {createMsg && (
         <div className={`alert ${createMsg.startsWith('✅') ? 'alert-info' : 'alert-error'}`} style={{ marginBottom: '12px' }}>
           {createMsg}

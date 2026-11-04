@@ -165,14 +165,23 @@ module.exports = router;
 
 // ─── Provisioning / Setup routes ─────────────────────────────────────────────
 
-// Helper: build mgmtconfig base for OneAPI
-// OneAPI uses /zpa/mgmtconfig/v1/admin/customers/{customerId}
-// Legacy uses /mgmtconfig/v1/admin/customers/{customerId}
+// Helper: build mgmtconfig base
+// For OneAPI: base is https://api.zscaler.com/zpa/v1
+//   with customerId: https://api.zscaler.com/zpa/mgmtconfig/v1/admin/customers/{id}
+//   without customerId: fall back to /zpa/v1 (works for list endpoints)
+// For legacy: base is https://{tenant}/api/v1
+//   mgmtconfig: https://{tenant}/mgmtconfig/v1/admin/customers/{id}
 function mgmtBase(base, customerId) {
-  if (base.includes('api.zscaler')) {
-    return `${base.replace('/zpa/v1','')}/zpa/mgmtconfig/v1/admin/customers/${customerId}`;
+  if (!customerId) {
+    // No customerId — use the base path directly (works for GET lists on legacy + OneAPI)
+    return base;
   }
-  return `${base.replace('/api/v1','')}/mgmtconfig/v1/admin/customers/${customerId}`;
+  if (base.includes('api.zscaler') || base.includes('api.zscalertwo') || base.includes('api.zscloud') || base.includes('api.zscalerone') || base.includes('api.zscalerthree') || base.includes('api.zscalerbeta')) {
+    // OneAPI: swap /zpa/v1 for /zpa/mgmtconfig/v1/admin/customers/{id}
+    return base.replace(/\/zpa\/v1.*$/, '') + `/zpa/mgmtconfig/v1/admin/customers/${customerId}`;
+  }
+  // Legacy: swap /api/v1 for /mgmtconfig/v1/admin/customers/{id}
+  return base.replace(/\/api\/v1.*$/, '') + `/mgmtconfig/v1/admin/customers/${customerId}`;
 }
 
 // GET /api/zpa/customer — get customer/tenant info (for customerId)
@@ -180,17 +189,23 @@ router.get('/customer', async (req, res) => {
   const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
   try {
     const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
-    // Try OneAPI path first
-    let customerInfo;
-    try {
-      const r = await axios.get(`${base.replace('/zpa/v1','')}/zpa/mgmtconfig/v1/admin/customers`, { headers, timeout: 10000 });
-      customerInfo = r.data;
-    } catch {
-      // Legacy path
-      const r = await axios.get(`${base.replace('/api/v1','')}/api/v1/customers`, { headers, timeout: 10000 });
-      customerInfo = r.data;
+    // Try several paths to find the customer/tenant ID
+    const paths = [
+      `${base}/tenant`,
+      `${base}/customers`,
+      `${base.replace('/zpa/v1','')}/zpa/mgmtconfig/v1/admin/customers`,
+      `${base.replace('/api/v1','')}/api/v1/customers`,
+    ];
+    for (const url of paths) {
+      try {
+        const r = await axios.get(url, { headers, timeout: 8000 });
+        const d = r.data;
+        // customerId might be top-level or in a list
+        const id = d.id || d.customerId || (Array.isArray(d) && d[0]?.id) || d.list?.[0]?.id;
+        if (id) return res.json({ id, raw: d });
+      } catch { /* try next */ }
     }
-    res.json(customerInfo);
+    res.status(404).json({ error: 'Could not determine customerId — you may need to enter it manually' });
   } catch (err) {
     res.status(400).json({ error: err.response?.data?.message || err.message });
   }
