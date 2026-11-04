@@ -23,6 +23,8 @@ export default function ZPASetup({ data, update, next, back }) {
   const [provisioningKeys, setProvisioningKeys] = useState([])
   const [loadingData, setLoadingData]         = useState(false)
   const [loadError, setLoadError]             = useState('')
+  const [tokenClaims, setTokenClaims]           = useState(null)
+  const [debuggingToken, setDebuggingToken]     = useState(false)
 
   // Form state
   const [provisioningKey, setProvisioningKey]     = useState(data.provisioningKey || '')
@@ -98,6 +100,17 @@ export default function ZPASetup({ data, update, next, back }) {
     } finally {
       setLoadingData(false)
     }
+  }
+
+  // Debug: decode token claims
+  const debugToken = async () => {
+    setDebuggingToken(true); setTokenClaims(null)
+    try {
+      const res = await axios.get('/api/zpa/debug-token', { params: authParams })
+      setTokenClaims(res.data)
+    } catch (err) {
+      setTokenClaims({ error: err.response?.data?.error || err.message })
+    } finally { setDebuggingToken(false) }
   }
 
   // Create a new connector group
@@ -177,12 +190,47 @@ export default function ZPASetup({ data, update, next, back }) {
       )}
       {loadError && (
         <div className="alert alert-warning" style={{ marginBottom: '12px' }}>
-          ⚠️ Couldn't load ZPA data automatically: {loadError}
-          <button onClick={loadAll} style={{ marginLeft: '10px', fontSize: '12px', padding: '2px 8px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: 'none' }}>Retry</button>
+          {loadError.includes('No handler found') || loadError.includes('resource.not.found') ? (
+            <>
+              <strong>🔐 API Client missing ZPA permissions</strong><br/>
+              Your OneAPI token is valid but your API client hasn't been granted ZPA Admin access in Zidentity.<br/>
+              <strong>Fix in 2 steps:</strong>
+              <ol style={{ marginTop: '6px', marginBottom: '6px', paddingLeft: '18px' }}>
+                <li>Go to <a href="https://admin.zidentity.net" target="_blank" rel="noreferrer">admin.zidentity.net</a> → <strong>API Clients</strong> → your client</li>
+                <li>Add role: <strong>ZPA Admin</strong> (or Super Admin) → Save</li>
+              </ol>
+              Then <button onClick={() => loadAll(customerId)} style={{ fontSize: '12px', padding: '2px 8px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: 'none' }}>Retry</button>
+              &nbsp;or switch to <strong>API Key</strong> auth mode on step 1 to bypass this.
+            </>
+          ) : (
+            <>
+              ⚠️ Couldn't load ZPA data automatically: {loadError}
+              <button onClick={() => loadAll(customerId)} style={{ marginLeft: '10px', fontSize: '12px', padding: '2px 8px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: 'none' }}>Retry</button>
+            </>
+          )}
         </div>
       )}
 
       {/* Customer ID — needed for mgmtconfig API calls */}
+      {authParams.authMode === 'oneapi' && (
+        <div style={{ marginBottom: '10px' }}>
+          <button onClick={debugToken} disabled={debuggingToken}
+            style={{ fontSize: '12px', padding: '4px 10px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: '#f9fafb' }}>
+            {debuggingToken ? '...' : '🔍 Inspect Token Claims'}
+          </button>
+          {tokenClaims && !tokenClaims.error && (
+            <div style={{ marginTop: '8px', padding: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', fontSize: '12px' }}>
+              <strong>Token Claims:</strong><br/>
+              <b>aud:</b> {JSON.stringify(tokenClaims.aud)}<br/>
+              <b>scp/scope:</b> {JSON.stringify(tokenClaims.scp) || '(none)'}<br/>
+              <b>roles:</b> {JSON.stringify(tokenClaims.roles) || '(none)'}<br/>
+              <b>sub:</b> {tokenClaims.sub}<br/>
+              <b>exp:</b> {tokenClaims.exp}
+            </div>
+          )}
+          {tokenClaims?.error && <span style={{ marginLeft: '8px', color: '#dc2626', fontSize: '12px' }}>{tokenClaims.error}</span>}
+        </div>
+      )}
       <div className="form-group">
         <label>ZPA Customer ID</label>
         <input type="text"

@@ -309,4 +309,29 @@ router.get('/customer', async (req, res) => {
   }
 });
 
+// GET /api/zpa/debug-token — decode JWT claims (no verification) to diagnose scope issues
+router.get('/debug-token', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
+  try {
+    if (authMode !== 'oneapi') return res.json({ note: 'Only relevant for OneAPI mode' });
+    const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
+    // Decode JWT payload (base64url, no verification)
+    const parts = token.split('.');
+    if (parts.length !== 3) return res.status(400).json({ error: 'Not a JWT' });
+    const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString());
+    // Don't log the full token, just the claims
+    res.json({
+      sub: payload.sub,
+      aud: payload.aud,
+      scp: payload.scp || payload.scope,
+      iss: payload.iss,
+      exp: payload.exp ? new Date(payload.exp * 1000).toISOString() : null,
+      roles: payload.roles || payload['zscaler.roles'] || payload.groups,
+      allClaims: Object.keys(payload),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 module.exports = router;
