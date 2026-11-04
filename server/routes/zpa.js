@@ -100,7 +100,7 @@ async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, 
       const gwHost = ONEAPI_GATEWAY[cloudEnv] || 'https://api.zsapi.net';
       console.log('[getClient oneapi] zpaHost:', zpaHost, 'gwHost:', gwHost, 'customerId:', customerId, 'token:', token.slice(0, 20) + '...');
 
-      const mgmtBase = zpaHost + '/mgmtconfig/v1/admin/customers/' + (customerId || '');
+      const mgmtBase = zpaHost + '/zpa/mgmtconfig/v1/admin/customers/' + (customerId || '');
       return {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         base: mgmtBase,
@@ -146,18 +146,18 @@ router.get('/validate', async (req, res) => {
       console.log('[validate oneapi] zpaHost:', zpaHost);
 
       // Discover customer(s) for this token
-      const custRes = await axios.get(zpaHost + '/mgmtconfig/v1/admin/customers', { headers, timeout: 10000 })
+      const custRes = await axios.get(zpaHost + '/zpa/mgmtconfig/v1/admin/customers', { headers, timeout: 10000 })
         .catch(() => null);
       let customerId = null;
       if (custRes?.data) {
         const custList = custRes.data.list || custRes.data.customers || custRes.data || [];
         const first = Array.isArray(custList) ? custList[0] : custList;
         customerId = first?.id || first?.customerId || null;
-        console.log('[validate] discovered customerId:', customerId, 'from', zpaHost + '/mgmtconfig/v1/admin/customers');
+        console.log('[validate] discovered customerId:', customerId, 'from', zpaHost + '/zpa/mgmtconfig/v1/admin/customers');
       }
       base = customerId
-        ? zpaHost + '/mgmtconfig/v1/admin/customers/' + customerId
-        : zpaHost + '/mgmtconfig/v1/admin/customers';
+        ? zpaHost + '/zpa/mgmtconfig/v1/admin/customers/' + customerId
+        : zpaHost + '/zpa/mgmtconfig/v1/admin/customers';
       mgmtBase = base;
       const [cgRes, asRes] = await Promise.allSettled([
         axios.get(base + '/appConnectorGroup', { headers, timeout: 10000 }),
@@ -345,7 +345,7 @@ router.get('/customer', async (req, res) => {
         const zpaAud = audList.find(a => a && a.startsWith('ZPA.'));
         if (zpaAud) { zpaHost = 'https://' + zpaAud.replace('ZPA.', 'config.'); }
       } catch(e) {}
-      const r = await axios.get(zpaHost + '/mgmtconfig/v1/admin/customers', { headers, timeout: 8000 });
+      const r = await axios.get(zpaHost + '/zpa/mgmtconfig/v1/admin/customers', { headers, timeout: 8000 });
       const custList = r.data.list || r.data.customers || r.data || [];
       const first = Array.isArray(custList) ? custList[0] : custList;
       return res.json({ id: first?.id || first?.customerId, raw: r.data });
