@@ -117,7 +117,7 @@ export default function ZPASetup({ data, update, next, back }) {
       setCreateMsg(`✅ Created connector group: ${newGroup.name}`)
       setTimeout(() => setCreateMsg(''), 4000)
     } catch (err) {
-      setCreateMsg(`❌ ${err.response?.data?.error || err.message}`)
+      setCreateMsg(`❌ ${err.response?.data?.error || err.message} ${err.response?.data?.url ? '[' + err.response.data.url + ']' : ''}`)
     } finally { setCreating(false) }
   }
 

@@ -228,11 +228,14 @@ router.get('/connector-groups', async (req, res) => {
   try {
     const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
     const mb = mgmtBase(base, customerId);
-    const r = await axios.get(`${mb}/appConnectorGroup`, { headers, timeout: 10000 });
+    const url = `${mb}/appConnectorGroup`;
+    console.log('[connector-groups GET]', url, 'customerId:', customerId);
+    const r = await axios.get(url, { headers, timeout: 10000 });
     const list = r.data.list || r.data.appConnectorGroups || r.data || [];
     res.json(list);
   } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message });
+    console.error('[connector-groups GET error]', err.response?.status, err.config?.url, err.response?.data);
+    res.status(400).json({ error: err.response?.data?.message || err.message, url: err.config?.url });
   }
 });
 
@@ -305,7 +308,9 @@ router.post('/connector-groups', async (req, res) => {
   try {
     const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
     const mb = mgmtBase(base, customerId);
-    const r = await axios.post(`${mb}/appConnectorGroup`, {
+    const url = `${mb}/appConnectorGroup`;
+    console.log('[connector-groups POST]', url, 'customerId:', customerId, 'name:', name);
+    const r = await axios.post(url, {
       name,
       description: description || 'App Scanner connector group — created by ZPA Shield Deployer',
       latitude: latitude || '37.3382',
@@ -319,7 +324,8 @@ router.post('/connector-groups', async (req, res) => {
     }, { headers, timeout: 15000 });
     res.json(r.data);
   } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message, raw: err.response?.data });
+    console.error("[connector-groups POST error]", err.response?.status, err.config?.url, err.response?.data);
+    res.status(400).json({ error: err.response?.data?.message || err.message, url: err.config?.url, raw: err.response?.data });
   }
 });
 
