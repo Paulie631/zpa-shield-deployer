@@ -15,8 +15,8 @@ export default function ZPASetup({ data, update, next, back }) {
   const isAWS = data.target === 'aws'
 
   // Data from API
-  const [customerId, setCustomerId] = useState(data.customerId || '')
-  const [customerIdInput, setCustomerIdInput] = useState(data.customerId || '')
+  const [customerId, setCustomerId] = useState(data.customerId || 'aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d')
+  const [customerIdInput, setCustomerIdInput] = useState(data.customerId || 'aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d')
   const [connectorGroups, setConnectorGroups] = useState(data.connectorGroups || [])
   const [serverGroups, setServerGroups]       = useState([])
   const [enrollmentCerts, setEnrollmentCerts] = useState([])
@@ -47,11 +47,10 @@ export default function ZPASetup({ data, update, next, back }) {
 
   const apiQuery = (extra = {}) => ({ ...authParams, customerId, ...extra })
 
-  const loadAll = async () => {
+  const loadAll = async (cidOverride) => {
     setLoadingData(true); setLoadError('')
     try {
-      // First get customerId if we don't have it
-      let cid = customerId || customerIdInput
+      let cid = cidOverride || customerId || customerIdInput
       if (!cid) {
         try {
           const custRes = await axios.get('/api/zpa/customer', { params: authParams })
@@ -103,10 +102,11 @@ export default function ZPASetup({ data, update, next, back }) {
 
   // Create a new connector group
   const createConnectorGroup = async () => {
+    const cid = customerId || customerIdInput
     setCreating(true); setCreateMsg('Creating connector group...')
     try {
       const res = await axios.post('/api/zpa/connector-groups', {
-        ...authParams, customerId,
+        ...authParams, customerId: cid,
         name: newGroupName,
         description: 'App Scanner connector group — created by ZPA Shield Deployer',
       })
@@ -123,12 +123,13 @@ export default function ZPASetup({ data, update, next, back }) {
 
   // Create a new provisioning key
   const createProvisioningKey = async () => {
+    const cid = customerId || customerIdInput
     if (!connectorGroupId) { setCreateMsg('❌ Select a connector group first'); return }
     if (!selectedCertId) { setCreateMsg('❌ No enrollment certificate found'); return }
     setCreating(true); setCreateMsg('Creating provisioning key...')
     try {
       const res = await axios.post('/api/zpa/provisioning-keys', {
-        ...authParams, customerId,
+        ...authParams, customerId: cid,
         name: newKeyName,
         maxUsage: '10',
         connectorGroupId,
@@ -188,7 +189,7 @@ export default function ZPASetup({ data, update, next, back }) {
           placeholder="e.g. aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d"
           value={customerIdInput}
           onChange={e => setCustomerIdInput(e.target.value.trim())}
-          onBlur={e => { setCustomerId(e.target.value.trim()); if (e.target.value.trim()) loadAll(); }}
+          onBlur={e => { const v = e.target.value.trim(); setCustomerIdInput(v); setCustomerId(v); if (v) loadAll(v); }}
         />
         <div className="hint">Found in Zidentity: your Tenant ID is your Customer ID. For your account: <strong>aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d</strong></div>
       </div>
