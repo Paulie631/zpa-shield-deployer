@@ -14,29 +14,28 @@ async function getTenantToken(tenantUrl, clientId, clientSecret) {
 }
 
 // Zidentity OAuth for OneAPI
-async function getOneApiToken(clientId, clientSecret, cloudEnv) {
-  // Token endpoint is on the same cloud domain as the API
-  const envTokenMap = {
-    'zscaler.com':        'https://api.zscaler.com/oauth2/v1/token',
-    'zscalertwo.net':     'https://api.zscalertwo.net/oauth2/v1/token',
-    'zscalerthree.net':   'https://api.zscalerthree.net/oauth2/v1/token',
-    'zscloud.net':        'https://api.zscloud.net/oauth2/v1/token',
-    'zscalerone.net':     'https://api.zscalerone.net/oauth2/v1/token',
-    'zscalerbeta.net':    'https://api.zscalerbeta.net/oauth2/v1/token',
-  }
-  const tokenUrl = envTokenMap[cloudEnv] || 'https://api.zscaler.com/oauth2/v1/token'
+// Token endpoint: https://{vanityDomain}.zslogin.net/oauth2/v1/token
+// vanityDomain = company slug, e.g. "acme" → acme.zslogin.net
+async function getOneApiToken(clientId, clientSecret, vanityDomain) {
+  if (!vanityDomain) throw new Error('vanityDomain is required for OneAPI auth (e.g. "acme" from acme.zslogin.net)');
+  const tokenUrl = `https://${vanityDomain}.zslogin.net/oauth2/v1/token`;
   const res = await axios.post(tokenUrl,
-    new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
-  )
-  return res.data.access_token
+    new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+      audience: 'https://api.zscaler.com',
+    }).toString(),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' }, timeout: 10000 }
+  );
+  return res.data.access_token;
 }
 
 /**
  * Returns { headers, base } ready to make ZPA API calls.
  * authMode: 'apikey' | 'oauth' | 'oneapi'
  */
-async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv }) {
+async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain }) {
   switch (authMode) {
     case 'apikey': {
       return {
@@ -52,7 +51,7 @@ async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, 
       };
     }
     case 'oneapi': {
-      const token = await getOneApiToken(clientId, clientSecret, cloudEnv);
+      const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
       // OneAPI base varies by cloud env — default to zscaler.com
       const envMap = {
         'zscaler.com':   'https://api.zscaler.com/zpa/v1',
@@ -77,9 +76,9 @@ async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, 
 
 // GET /api/zpa/validate
 router.get('/validate', async (req, res) => {
-  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv } = req.query;
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
   try {
-    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv });
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
 
     const [cgRes, asRes] = await Promise.allSettled([
       axios.get(`${base}/appConnectorGroup`, { headers, timeout: 10000 }),
@@ -108,10 +107,10 @@ router.get('/validate', async (req, res) => {
 
 // POST /api/zpa/scan
 router.post('/scan', async (req, res) => {
-  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv,
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain,
     appSegmentIds, probingLevel, frequency, startTime, scanName, scannerConnectorId } = req.body;
   try {
-    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv });
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
 
     const profileRes = await axios.post(`${base}/appProtection/scanProfile`, {
       name: `${scanName} Profile`,
@@ -138,9 +137,9 @@ router.post('/scan', async (req, res) => {
 
 // POST /api/zpa/app-segments
 router.post('/app-segments', async (req, res) => {
-  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, serverGroupId, apps } = req.body;
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, serverGroupId, apps } = req.body;
   try {
-    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv });
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
     const created = [];
     for (const app of apps) {
       const r = await axios.post(`${base}/application`, {

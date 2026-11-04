@@ -33,8 +33,9 @@ const GUIDES = {
     title: 'Where to find your OneAPI credentials',
     steps: [
       'Go to console.zscaler.com and log in as an admin',
-      'Navigate to Private Access → Client Credentials (or use the direct URL: console.zscaler.com/private/client-credentials)',
+      'Navigate to Private Access → Client Credentials (direct URL: console.zscaler.com/private/client-credentials)',
       'Click Add Client, set grant type to Client Credentials, copy the Client ID and Secret',
+      'Your Vanity Domain is shown on the client details page — it is the prefix before .zslogin.net (e.g. "acme" from acme.zslogin.net)',
       'Select the Cloud Environment below that matches your ZPA tenant',
     ],
     docsUrl: 'https://automate.zscaler.com/docs/getting-started/getting-started'
@@ -52,6 +53,7 @@ export default function ZPACredentials({ data, update, next }) {
   const [clientId, setClientId] = useState(data.clientId || '')
   const [clientSecret, setClientSecret] = useState(data.clientSecret || '')
   const [cloudEnv, setCloudEnv] = useState(data.cloudEnv || 'zscaler.com')
+  const [vanityDomain, setVanityDomain] = useState(data.vanityDomain || '')
   const [showApiKey, setShowApiKey] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -60,7 +62,7 @@ export default function ZPACredentials({ data, update, next }) {
   const guide = GUIDES[authMode]
   const isOneApi = authMode === 'oneapi'
 
-  const canSubmit = (isOneApi ? (clientId && clientSecret) : tenantUrl) &&
+  const canSubmit = (isOneApi ? (clientId && clientSecret && vanityDomain) : tenantUrl) &&
     (authMode === 'apikey' ? apiKey : clientId && clientSecret)
 
   const validate = async () => {
@@ -71,7 +73,7 @@ export default function ZPACredentials({ data, update, next }) {
       if (!isOneApi) params.tenantUrl = tenantUrl
       if (authMode === 'apikey') params.apiKey = apiKey
       else { params.clientId = clientId; params.clientSecret = clientSecret }
-      if (isOneApi) params.cloudEnv = cloudEnv
+      if (isOneApi) { params.cloudEnv = cloudEnv; params.vanityDomain = vanityDomain; }
 
       const res = await axios.get('/api/zpa/validate', { params })
 
@@ -79,6 +81,7 @@ export default function ZPACredentials({ data, update, next }) {
         authMode,
         tenantUrl: isOneApi ? null : tenantUrl,
         cloudEnv: isOneApi ? cloudEnv : null,
+        vanityDomain: isOneApi ? vanityDomain : null,
         apiKey: authMode === 'apikey' ? apiKey : undefined,
         clientId: authMode !== 'apikey' ? clientId : undefined,
         clientSecret: authMode !== 'apikey' ? clientSecret : undefined,
@@ -156,15 +159,30 @@ export default function ZPACredentials({ data, update, next }) {
         </div>
       )}
 
-      {/* Cloud environment for OneAPI */}
+      {/* Vanity domain + Cloud environment for OneAPI */}
       {isOneApi && (
-        <div className="form-group">
-          <label>Cloud Environment <span className="label-required">*</span></label>
-          <select value={cloudEnv} onChange={e => setCloudEnv(e.target.value)}>
-            {CLOUD_ENVS.map(e => <option key={e.value} value={e.value}>{e.label}</option>)}
-          </select>
-          <div className="hint">Match this to your ZPA tenant's cloud. Check your ZPA Admin Portal URL if unsure.</div>
-        </div>
+        <>
+          <div className="form-group">
+            <label>Vanity Domain <span className="label-required">*</span></label>
+            <div className="input-prefix-wrap">
+              <input
+                type="text"
+                placeholder="yourcompany"
+                value={vanityDomain}
+                onChange={e => setVanityDomain(e.target.value.trim().toLowerCase())}
+              />
+              <span className="input-suffix">.zslogin.net</span>
+            </div>
+            <div className="hint">Your Zscaler company slug. If your login URL is <strong>acme.zslogin.net</strong>, enter <strong>acme</strong>. Found on your OneAPI client page.</div>
+          </div>
+          <div className="form-group">
+            <label>Cloud Environment <span className="label-required">*</span></label>
+            <select value={cloudEnv} onChange={e => setCloudEnv(e.target.value)}>
+              {CLOUD_ENVS.map(e => <option key={e.value} value={e.value}>{e.label}</option>)}
+            </select>
+            <div className="hint">Match this to your ZPA tenant's cloud. Check your ZPA Admin Portal URL if unsure.</div>
+          </div>
+        </>
       )}
 
       {/* Where to find guide */}

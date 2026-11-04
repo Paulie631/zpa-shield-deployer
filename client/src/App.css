@@ -399,6 +399,28 @@ body {
 /* === ZPA Credentials helpers === */
 .label-required { color: #ef4444; }
 
+.input-prefix-wrap {
+  display: flex;
+  align-items: stretch;
+}
+.input-prefix-wrap input {
+  border-radius: 8px 0 0 8px !important;
+  flex: 1;
+}
+.input-suffix {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: #F1F5F9;
+  border: 1.5px solid #D1D9E6;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  font-size: 13px;
+  color: #64748b;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
 .input-with-prefix {
   display: flex;
   align-items: stretch;
