@@ -202,9 +202,23 @@ export default function ZPASetup({ data, update, next, back }) {
               Then <button onClick={() => loadAll(customerId)} style={{ fontSize: '12px', padding: '2px 8px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: 'none' }}>Retry</button>
               &nbsp;or switch to <strong>API Key</strong> auth mode on step 1 to bypass this.
             </>
+          ) : loadError.includes('bad.request') ? (
+            <>
+              <strong>🚫 OneAPI tokens not accepted by ZPA mgmtconfig</strong><br/>
+              The ZPA management API on <code>config.zpatwo.net</code> requires a <strong>ZPA API Key</strong>, not a OneAPI/Zidentity Bearer token.<br/>
+              This is a ZPA platform limitation — mgmtconfig predates OneAPI and uses its own auth system.<br/><br/>
+              <strong>Solution: Switch to API Key auth mode</strong>
+              <ol style={{ marginTop: '6px', marginBottom: '6px', paddingLeft: '18px' }}>
+                <li>Go back to <strong>Step 1 (ZPA Credentials)</strong></li>
+                <li>Select <strong>API Key</strong> auth mode</li>
+                <li>Tenant URL: <code>paulaiuto.zpatwo.net</code></li>
+                <li>Get your API Key: ZPA Admin Portal → <strong>Administration → API Key Management</strong></li>
+              </ol>
+              <em>Your OneAPI credentials still work for scan/shield operations on api.zscaler.com — only the setup step needs API Key.</em>
+            </>
           ) : (
             <>
-              ⚠️ Couldn't load ZPA data automatically: {loadError}
+              ⚠️ Couldn’t load ZPA data automatically: {loadError}
               <button onClick={() => loadAll(customerId)} style={{ marginLeft: '10px', fontSize: '12px', padding: '2px 8px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: 'none' }}>Retry</button>
             </>
           )}
