@@ -160,78 +160,18 @@ router.post('/app-segments', async (req, res) => {
   }
 });
 
-module.exports = router;
-
-
 // ─── Provisioning / Setup routes ─────────────────────────────────────────────
+// NOTE: All routes use base directly (api.zscaler.com/zpa/v1 for OneAPI)
+// config.private.zscaler.com does NOT accept OneAPI Bearer tokens
 
-// Helper: build mgmtconfig base
-// mgmtconfig ALWAYS lives at config.private.zscaler.com regardless of auth mode
-// OneAPI token is accepted there too
-function mgmtBase(base, customerId) {
-  if (!customerId) return base; // fallback: use validate-style base (works for some list endpoints)
-  // Determine the mgmtconfig host from the base URL
-  // Legacy:  https://{tenant}.private.zscaler.com/api/v1  -> https://{tenant}.private.zscaler.com/mgmtconfig/v1/admin/customers/{id}
-  // OneAPI:  https://api.zscaler.com/zpa/v1               -> https://config.private.zscaler.com/mgmtconfig/v1/admin/customers/{id}
-  // (OneAPI Bearer tokens are accepted by config.private.zscaler.com)
-  const envHostMap = {
-    'api.zscaler.com':        'config.private.zscaler.com',
-    'api.zscalertwo.net':     'config.zpatwo.net',
-    'api.zscalerthree.net':   'config.zpathree.net',
-    'api.zscloud.net':        'config.zscloud.net',
-    'api.zscalerone.net':     'config.zscalerone.net',
-    'api.zscalerbeta.net':    'config.zpabeta.net',
-    'api.zscalergov.net':     'config.zpagov.net',
-  };
-  let configHost = 'config.private.zscaler.com'; // default
-  for (const [apiHost, cfgHost] of Object.entries(envHostMap)) {
-    if (base.includes(apiHost)) { configHost = cfgHost; break; }
-  }
-  // If base is already a legacy tenant URL (e.g. acme.private.zscaler.com), use it directly
-  if (!base.includes('api.zscaler') && !base.includes('api.zscloud') && !base.includes('api.zscalerone')) {
-    const legacyHost = base.replace(/^https:\/\//, '').split('/')[0];
-    configHost = legacyHost;
-  }
-  return `https://${configHost}/mgmtconfig/v1/admin/customers/${customerId}`;
-}
-
-// GET /api/zpa/customer — get customer/tenant info (for customerId)
-router.get('/customer', async (req, res) => {
+router.get('/connector-groups', async (req, res) => {
   const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
   try {
     const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
-    // Try several paths to find the customer/tenant ID
-    const paths = [
-      `${base}/tenant`,
-      `${base}/customers`,
-      `${base.replace('/zpa/v1','')}/zpa/mgmtconfig/v1/admin/customers`,
-      `${base.replace('/api/v1','')}/api/v1/customers`,
-    ];
-    for (const url of paths) {
-      try {
-        const r = await axios.get(url, { headers, timeout: 8000 });
-        const d = r.data;
-        // customerId might be top-level or in a list
-        const id = d.id || d.customerId || (Array.isArray(d) && d[0]?.id) || d.list?.[0]?.id;
-        if (id) return res.json({ id, raw: d });
-      } catch { /* try next */ }
-    }
-    res.status(404).json({ error: 'Could not determine customerId — you may need to enter it manually' });
-  } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message });
-  }
-});
-
-// GET /api/zpa/connector-groups — list app connector groups
-router.get('/connector-groups', async (req, res) => {
-  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
-  try {
-    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
-    const mb = mgmtBase(base, customerId);
-    const url = `${mb}/appConnectorGroup`;
-    console.log('[connector-groups GET]', url, 'customerId:', customerId);
+    const url = base + '/appConnectorGroup';
+    console.log('[connector-groups GET]', url);
     const r = await axios.get(url, { headers, timeout: 10000 });
-    const list = r.data.list || r.data.appConnectorGroups || r.data || [];
+    const list = r.data.list || r.data.appConnectorGroups || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
   } catch (err) {
     console.error('[connector-groups GET error]', err.response?.status, err.config?.url, err.response?.data);
@@ -239,93 +179,85 @@ router.get('/connector-groups', async (req, res) => {
   }
 });
 
-// GET /api/zpa/server-groups — list server groups
 router.get('/server-groups', async (req, res) => {
-  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
   try {
     const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
-    const mb = mgmtBase(base, customerId);
-    const r = await axios.get(`${mb}/serverGroup`, { headers, timeout: 10000 });
-    const list = r.data.list || r.data.serverGroups || r.data || [];
+    const r = await axios.get(base + '/serverGroup', { headers, timeout: 10000 });
+    const list = r.data.list || r.data.serverGroups || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
-  } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message });
-  }
+  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.message }); }
 });
 
-// GET /api/zpa/enrollment-certs — list enrollment certs
 router.get('/enrollment-certs', async (req, res) => {
-  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
   try {
     const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
-    const mb = mgmtBase(base, customerId);
-    const r = await axios.get(`${mb}/enrollmentCert`, { headers, timeout: 10000 });
-    const list = r.data.list || r.data.enrollmentCerts || r.data || [];
+    const r = await axios.get(base + '/enrollmentCert', { headers, timeout: 10000 });
+    const list = r.data.list || r.data.enrollmentCerts || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
-  } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message });
-  }
+  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.message }); }
 });
 
-// GET /api/zpa/provisioning-keys — list existing provisioning keys
 router.get('/provisioning-keys', async (req, res) => {
-  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
   try {
     const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
-    const mb = mgmtBase(base, customerId);
-    const r = await axios.get(`${mb}/associationType/CONNECTOR_GRP/provisioningKey`, { headers, timeout: 10000 });
-    const list = r.data.list || r.data || [];
+    const r = await axios.get(base + '/associationType/CONNECTOR_GRP/provisioningKey', { headers, timeout: 10000 });
+    const list = r.data.list || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
-  } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message });
-  }
+  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.message }); }
 });
 
-// POST /api/zpa/provisioning-keys — create a new provisioning key
 router.post('/provisioning-keys', async (req, res) => {
   const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain,
-    customerId, name, maxUsage, connectorGroupId, enrollmentCertId } = req.body;
+    name, maxUsage, connectorGroupId, enrollmentCertId } = req.body;
   try {
     const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
-    const mb = mgmtBase(base, customerId);
-    const r = await axios.post(`${mb}/associationType/CONNECTOR_GRP/provisioningKey`, {
-      name,
-      maxUsage: maxUsage || '10',
-      appConnectorGroupId: connectorGroupId,
-      enrollmentCertId,
-      zcomponentId: connectorGroupId,
-    }, { headers, timeout: 15000 });
-    res.json(r.data);
-  } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message, raw: err.response?.data });
-  }
-});
-
-// POST /api/zpa/connector-groups — create a new connector group
-router.post('/connector-groups', async (req, res) => {
-  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain,
-    customerId, name, description, latitude, longitude, location } = req.body;
-  try {
-    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
-    const mb = mgmtBase(base, customerId);
-    const url = `${mb}/appConnectorGroup`;
-    console.log('[connector-groups POST]', url, 'customerId:', customerId, 'name:', name);
+    const url = base + '/associationType/CONNECTOR_GRP/provisioningKey';
+    console.log('[provisioning-keys POST]', url);
     const r = await axios.post(url, {
-      name,
-      description: description || 'App Scanner connector group — created by ZPA Shield Deployer',
-      latitude: latitude || '37.3382',
-      longitude: longitude || '-121.8863',
-      location: location || 'San Jose, CA',
-      upgradeDay: 'SUNDAY',
-      upgradeTimeInSecs: '66600',
-      overrideVersionProfile: true,
-      versionProfileId: '0',
-      dnsQueryType: 'IPV4_IPV6',
+      name, maxUsage: maxUsage || '10',
+      appConnectorGroupId: connectorGroupId,
+      enrollmentCertId, zcomponentId: connectorGroupId,
     }, { headers, timeout: 15000 });
     res.json(r.data);
   } catch (err) {
-    console.error("[connector-groups POST error]", err.response?.status, err.config?.url, err.response?.data);
     res.status(400).json({ error: err.response?.data?.message || err.message, url: err.config?.url, raw: err.response?.data });
   }
 });
 
+router.post('/connector-groups', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain,
+    name, description, latitude, longitude, location } = req.body;
+  try {
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
+    const url = base + '/appConnectorGroup';
+    console.log('[connector-groups POST]', url, 'name:', name);
+    const r = await axios.post(url, {
+      name,
+      description: description || 'App Scanner connector group - created by ZPA Shield Deployer',
+      latitude: latitude || '37.3382', longitude: longitude || '-121.8863',
+      location: location || 'San Jose, CA',
+      upgradeDay: 'SUNDAY', upgradeTimeInSecs: '66600',
+      overrideVersionProfile: true, versionProfileId: '0', dnsQueryType: 'IPV4_IPV6',
+    }, { headers, timeout: 15000 });
+    res.json(r.data);
+  } catch (err) {
+    console.error('[connector-groups POST error]', err.response?.status, err.config?.url, err.response?.data);
+    res.status(400).json({ error: err.response?.data?.message || err.message, url: err.config?.url, raw: err.response?.data });
+  }
+});
+
+router.get('/customer', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
+  try {
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
+    const r = await axios.get(base + '/tenant', { headers, timeout: 8000 });
+    res.json({ id: r.data.id || r.data.customerId, raw: r.data });
+  } catch (err) {
+    res.status(404).json({ error: 'Could not determine customerId' });
+  }
+});
+
+module.exports = router;
