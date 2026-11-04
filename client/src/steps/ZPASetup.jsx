@@ -1,70 +1,317 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import axios from 'axios'
 
 export default function ZPASetup({ data, update, next, back }) {
-  const [form, setForm] = useState({
-    provisioningKey: data.provisioningKey || '',
-    connectorGroupId: data.connectorGroupId || '',
-    serverGroupName: data.serverGroupName || '',
-    ssmParamName: data.ssmParamName || '/zpa/provisioning-key',
-  })
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const authParams = {
+    authMode: data.authMode,
+    tenantUrl: data.tenantUrl,
+    apiKey: data.apiKey,
+    clientId: data.clientId,
+    clientSecret: data.clientSecret,
+    cloudEnv: data.cloudEnv,
+    vanityDomain: data.vanityDomain,
+  }
 
-  const groups = data.connectorGroups || []
   const isAWS = data.target === 'aws'
+
+  // Data from API
+  const [customerId, setCustomerId]           = useState(data.customerId || '')
+  const [connectorGroups, setConnectorGroups] = useState(data.connectorGroups || [])
+  const [serverGroups, setServerGroups]       = useState([])
+  const [enrollmentCerts, setEnrollmentCerts] = useState([])
+  const [provisioningKeys, setProvisioningKeys] = useState([])
+  const [loadingData, setLoadingData]         = useState(false)
+  const [loadError, setLoadError]             = useState('')
+
+  // Form state
+  const [provisioningKey, setProvisioningKey]     = useState(data.provisioningKey || '')
+  const [connectorGroupId, setConnectorGroupId]   = useState(data.connectorGroupId || '')
+  const [serverGroupId, setServerGroupId]         = useState(data.serverGroupId || '')
+  const [serverGroupName, setServerGroupName]     = useState(data.serverGroupName || '')
+  const [ssmParamName, setSsmParamName]           = useState(data.ssmParamName || '/zpa/provisioning-key')
+
+  // Create-new state
+  const [showNewGroup, setShowNewGroup]           = useState(false)
+  const [newGroupName, setNewGroupName]           = useState('ZPA-AppScanner-Group')
+  const [showNewKey, setShowNewKey]               = useState(false)
+  const [newKeyName, setNewKeyName]               = useState('ZPA-AppScanner-Key')
+  const [selectedCertId, setSelectedCertId]       = useState('')
+  const [creating, setCreating]                   = useState(false)
+  const [createMsg, setCreateMsg]                 = useState('')
+
+  // Load all data on mount
+  useEffect(() => {
+    loadAll()
+  }, [])
+
+  const apiQuery = (extra = {}) => ({ ...authParams, customerId, ...extra })
+
+  const loadAll = async () => {
+    setLoadingData(true); setLoadError('')
+    try {
+      // First get customerId if we don't have it
+      let cid = customerId
+      if (!cid) {
+        try {
+          const custRes = await axios.get('/api/zpa/customer', { params: authParams })
+          cid = custRes.data?.id || custRes.data?.customerId || custRes.data?.[0]?.id || ''
+          setCustomerId(cid)
+        } catch { /* customerId optional for some auth modes */ }
+      }
+
+      const params = { ...authParams, customerId: cid }
+
+      // Fetch connector groups, enrollment certs, provisioning keys in parallel
+      const [cgRes, certRes, keyRes, sgRes] = await Promise.allSettled([
+        axios.get('/api/zpa/connector-groups', { params }),
+        axios.get('/api/zpa/enrollment-certs', { params }),
+        axios.get('/api/zpa/provisioning-keys', { params }),
+        axios.get('/api/zpa/server-groups', { params }),
+      ])
+
+      if (cgRes.status === 'fulfilled') {
+        const groups = cgRes.value.data || []
+        setConnectorGroups(groups)
+        // Auto-select if only one or if previously selected
+        if (!connectorGroupId && groups.length === 1) setConnectorGroupId(groups[0].id)
+      }
+      if (certRes.status === 'fulfilled') {
+        const certs = certRes.value.data || []
+        setEnrollmentCerts(certs)
+        // Auto-select Connector cert
+        const connCert = certs.find(c => /connector/i.test(c.name))
+        if (connCert) setSelectedCertId(connCert.id)
+      }
+      if (keyRes.status === 'fulfilled') {
+        setProvisioningKeys(keyRes.value.data || [])
+      }
+      if (sgRes.status === 'fulfilled') {
+        const sgs = sgRes.value.data || []
+        setServerGroups(sgs)
+        if (!serverGroupId && sgs.length === 1) { setServerGroupId(sgs[0].id); setServerGroupName(sgs[0].name) }
+      }
+    } catch (err) {
+      setLoadError(err.response?.data?.error || err.message)
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
+  // Create a new connector group
+  const createConnectorGroup = async () => {
+    setCreating(true); setCreateMsg('Creating connector group...')
+    try {
+      const res = await axios.post('/api/zpa/connector-groups', {
+        ...authParams, customerId,
+        name: newGroupName,
+        description: 'App Scanner connector group — created by ZPA Shield Deployer',
+      })
+      const newGroup = res.data
+      setConnectorGroups(prev => [...prev, newGroup])
+      setConnectorGroupId(newGroup.id)
+      setShowNewGroup(false)
+      setCreateMsg(`✅ Created connector group: ${newGroup.name}`)
+      setTimeout(() => setCreateMsg(''), 4000)
+    } catch (err) {
+      setCreateMsg(`❌ ${err.response?.data?.error || err.message}`)
+    } finally { setCreating(false) }
+  }
+
+  // Create a new provisioning key
+  const createProvisioningKey = async () => {
+    if (!connectorGroupId) { setCreateMsg('❌ Select a connector group first'); return }
+    if (!selectedCertId) { setCreateMsg('❌ No enrollment certificate found'); return }
+    setCreating(true); setCreateMsg('Creating provisioning key...')
+    try {
+      const res = await axios.post('/api/zpa/provisioning-keys', {
+        ...authParams, customerId,
+        name: newKeyName,
+        maxUsage: '10',
+        connectorGroupId,
+        enrollmentCertId: selectedCertId,
+      })
+      const key = res.data
+      setProvisioningKeys(prev => [...prev, key])
+      setProvisioningKey(key.provisioningKey || key.key || key.value || JSON.stringify(key))
+      setShowNewKey(false)
+      setCreateMsg(`✅ Provisioning key created and filled in below`)
+      setTimeout(() => setCreateMsg(''), 5000)
+    } catch (err) {
+      setCreateMsg(`❌ ${err.response?.data?.error || err.message}`)
+    } finally { setCreating(false) }
+  }
+
+  const canContinue = provisioningKey && connectorGroupId
+
+  const handleContinue = () => {
+    update({
+      provisioningKey,
+      connectorGroupId,
+      connectorGroupName: connectorGroups.find(g => g.id === connectorGroupId)?.name || connectorGroupId,
+      serverGroupId,
+      serverGroupName: serverGroups.find(g => g.id === serverGroupId)?.name || serverGroupName,
+      customerId,
+      ssmParamName,
+    })
+    next()
+  }
 
   return (
     <div className="card">
       <h2>ZPA Connector Setup</h2>
-      <p className="subtitle">Configure the ZPA App Connector provisioning details. The provisioning key links this instance to your ZPA tenant.</p>
+      <p className="subtitle">
+        Configure the App Connector provisioning details. The wizard can create the connector group and provisioning key for you via the ZPA API.
+      </p>
 
-      <div className="disclaimer">🔒 Your provisioning key is {isAWS ? 'stored in AWS SSM Parameter Store as a SecureString and never logged.' : 'embedded in the setup script — keep the script file secure.'}</div>
+      <div className="disclaimer">
+        🔒 Your provisioning key is {isAWS ? 'stored in AWS SSM Parameter Store as a SecureString and never logged.' : 'embedded in the setup script — keep the script file secure.'}
+      </div>
 
+      {loadingData && (
+        <div style={{ color: '#2563eb', fontSize: '14px', margin: '12px 0' }}>🔄 Loading ZPA configuration via API...</div>
+      )}
+      {loadError && (
+        <div className="alert alert-warning" style={{ marginBottom: '12px' }}>
+          ⚠️ Couldn't load ZPA data automatically: {loadError}
+          <button onClick={loadAll} style={{ marginLeft: '10px', fontSize: '12px', padding: '2px 8px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: 'none' }}>Retry</button>
+        </div>
+      )}
+      {createMsg && (
+        <div className={`alert ${createMsg.startsWith('✅') ? 'alert-info' : 'alert-error'}`} style={{ marginBottom: '12px' }}>
+          {createMsg}
+        </div>
+      )}
+
+      {/* ── Connector Group ── */}
       <div className="form-group">
-        <label>ZPA Provisioning Key</label>
+        <label>App Connector Group <span className="label-required">*</span></label>
+        {connectorGroups.length > 0 ? (
+          <select value={connectorGroupId} onChange={e => setConnectorGroupId(e.target.value)}>
+            <option value="">— Select or create a dedicated group —</option>
+            {connectorGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        ) : !loadingData ? (
+          <input type="text" placeholder="No groups found — create one below"
+            value={connectorGroupId} onChange={e => setConnectorGroupId(e.target.value)} />
+        ) : null}
+        <div className="hint">Must be a dedicated group — do not mix with traffic-forwarding connectors.</div>
+
+        {!showNewGroup ? (
+          <button onClick={() => setShowNewGroup(true)} disabled={creating}
+            style={{ marginTop: '8px', fontSize: '13px', padding: '5px 12px', background: 'none', border: '1px solid #2563eb', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}>
+            ➕ Create new connector group
+          </button>
+        ) : (
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '14px', marginTop: '10px' }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '13px' }}>New App Connector Group</div>
+            <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
+              placeholder="Group name" style={{ marginBottom: '8px', width: '100%' }} />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="btn btn-primary" onClick={createConnectorGroup} disabled={creating || !newGroupName}
+                style={{ fontSize: '13px' }}>
+                {creating ? '⏳ Creating...' : '✅ Create Group'}
+              </button>
+              <button onClick={() => setShowNewGroup(false)} disabled={creating}
+                style={{ fontSize: '13px', padding: '6px 12px', background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Provisioning Key ── */}
+      <div className="form-group">
+        <label>ZPA Provisioning Key <span className="label-required">*</span></label>
+
+        {/* Existing keys picker */}
+        {provisioningKeys.length > 0 && (
+          <div style={{ marginBottom: '8px' }}>
+            <select onChange={e => {
+              const k = provisioningKeys.find(k => k.id === e.target.value)
+              if (k) setProvisioningKey(k.provisioningKey || k.key || k.value || '')
+            }} defaultValue="">
+              <option value="">— Use an existing key —</option>
+              {provisioningKeys.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
+            </select>
+          </div>
+        )}
+
         <textarea
-          placeholder="Paste your App Connector provisioning key here..."
-          value={form.provisioningKey}
-          onChange={e => set('provisioningKey', e.target.value)}
+          placeholder="Paste your provisioning key here, or create one below..."
+          value={provisioningKey}
+          onChange={e => setProvisioningKey(e.target.value)}
           rows={4}
         />
-        <div className="hint">Generate this in ZPA Admin Portal → Infrastructure → App Connectors → Add → Provisioning Key</div>
+        <div className="hint">
+          Provisioning key from ZPA Admin Portal → Infrastructure → App Connectors → Provisioning Keys.
+        </div>
+
+        {/* Create new key */}
+        {!showNewKey ? (
+          <button onClick={() => setShowNewKey(true)} disabled={creating || !connectorGroupId}
+            style={{ marginTop: '8px', fontSize: '13px', padding: '5px 12px', background: 'none', border: '1px solid #2563eb', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}
+            title={!connectorGroupId ? 'Select a connector group first' : ''}>
+            ➕ Create new provisioning key via API
+          </button>
+        ) : (
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '14px', marginTop: '10px' }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '13px' }}>New Provisioning Key</div>
+            <input type="text" value={newKeyName} onChange={e => setNewKeyName(e.target.value)}
+              placeholder="Key name" style={{ marginBottom: '8px', width: '100%' }} />
+            {enrollmentCerts.length > 0 && (
+              <div style={{ marginBottom: '8px', fontSize: '13px' }}>
+                <label>Enrollment Certificate</label>
+                <select value={selectedCertId} onChange={e => setSelectedCertId(e.target.value)}>
+                  {enrollmentCerts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="btn btn-primary" onClick={createProvisioningKey} disabled={creating || !newKeyName}
+                style={{ fontSize: '13px' }}>
+                {creating ? '⏳ Creating...' : '✅ Create Key'}
+              </button>
+              <button onClick={() => setShowNewKey(false)} disabled={creating}
+                style={{ fontSize: '13px', padding: '6px 12px', background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* ── Server Group ── */}
       <div className="form-group">
-        <label>App Connector Group</label>
-        {groups.length > 0 ? (
-          <select value={form.connectorGroupId} onChange={e => set('connectorGroupId', e.target.value)}>
-            <option value="">-- Select a dedicated App Scanner group --</option>
-            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+        <label>Server Group</label>
+        {serverGroups.length > 0 ? (
+          <select value={serverGroupId} onChange={e => {
+            setServerGroupId(e.target.value)
+            setServerGroupName(serverGroups.find(g => g.id === e.target.value)?.name || '')
+          }}>
+            <option value="">— Optional: select a server group —</option>
+            {serverGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
         ) : (
-          <input type="text" placeholder="App Connector Group name"
-            value={form.connectorGroupId} onChange={e => set('connectorGroupId', e.target.value)} />
+          <input type="text" placeholder="e.g. zpa-scanner-server-group"
+            value={serverGroupName} onChange={e => setServerGroupName(e.target.value)} />
         )}
-        <div className="hint">Must be a dedicated group — do not mix with traffic-forwarding connectors</div>
+        <div className="hint">Optional — dedicated or existing server group for your target app segments.</div>
       </div>
 
-      <div className="form-group">
-        <label>Server Group Name</label>
-        <input type="text" placeholder="e.g. zpa-scanner-server-group"
-          value={form.serverGroupName} onChange={e => set('serverGroupName', e.target.value)} />
-        <div className="hint">Dedicated or existing server group associated with your target app segments</div>
-      </div>
-
+      {/* ── SSM param (AWS only) ── */}
       {isAWS && (
         <div className="form-group">
           <label>SSM Parameter Name</label>
           <input type="text" placeholder="/zpa/provisioning-key"
-            value={form.ssmParamName} onChange={e => set('ssmParamName', e.target.value)} />
-          <div className="hint">The provisioning key will be stored as a SecureString at this SSM path</div>
+            value={ssmParamName} onChange={e => setSsmParamName(e.target.value)} />
+          <div className="hint">The provisioning key will be stored as a SecureString at this SSM path.</div>
         </div>
       )}
 
       <div className="btn-row">
         <button className="btn btn-secondary" onClick={back}>← Back</button>
-        <button className="btn btn-primary"
-          onClick={() => { update(form); next() }}
-          disabled={!form.provisioningKey || !form.connectorGroupId}>
+        <button className="btn btn-primary" onClick={handleContinue} disabled={!canContinue}>
           Continue →
         </button>
       </div>

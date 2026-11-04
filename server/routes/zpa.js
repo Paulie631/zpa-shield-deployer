@@ -161,3 +161,139 @@ router.post('/app-segments', async (req, res) => {
 });
 
 module.exports = router;
+
+
+// ─── Provisioning / Setup routes ─────────────────────────────────────────────
+
+// Helper: build mgmtconfig base for OneAPI
+// OneAPI uses /zpa/mgmtconfig/v1/admin/customers/{customerId}
+// Legacy uses /mgmtconfig/v1/admin/customers/{customerId}
+function mgmtBase(base, customerId) {
+  if (base.includes('api.zscaler')) {
+    return `${base.replace('/zpa/v1','')}/zpa/mgmtconfig/v1/admin/customers/${customerId}`;
+  }
+  return `${base.replace('/api/v1','')}/mgmtconfig/v1/admin/customers/${customerId}`;
+}
+
+// GET /api/zpa/customer — get customer/tenant info (for customerId)
+router.get('/customer', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
+  try {
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
+    // Try OneAPI path first
+    let customerInfo;
+    try {
+      const r = await axios.get(`${base.replace('/zpa/v1','')}/zpa/mgmtconfig/v1/admin/customers`, { headers, timeout: 10000 });
+      customerInfo = r.data;
+    } catch {
+      // Legacy path
+      const r = await axios.get(`${base.replace('/api/v1','')}/api/v1/customers`, { headers, timeout: 10000 });
+      customerInfo = r.data;
+    }
+    res.json(customerInfo);
+  } catch (err) {
+    res.status(400).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// GET /api/zpa/connector-groups — list app connector groups
+router.get('/connector-groups', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
+  try {
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
+    const mb = mgmtBase(base, customerId);
+    const r = await axios.get(`${mb}/appConnectorGroup`, { headers, timeout: 10000 });
+    const list = r.data.list || r.data.appConnectorGroups || r.data || [];
+    res.json(list);
+  } catch (err) {
+    res.status(400).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// GET /api/zpa/server-groups — list server groups
+router.get('/server-groups', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
+  try {
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
+    const mb = mgmtBase(base, customerId);
+    const r = await axios.get(`${mb}/serverGroup`, { headers, timeout: 10000 });
+    const list = r.data.list || r.data.serverGroups || r.data || [];
+    res.json(list);
+  } catch (err) {
+    res.status(400).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// GET /api/zpa/enrollment-certs — list enrollment certs
+router.get('/enrollment-certs', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
+  try {
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
+    const mb = mgmtBase(base, customerId);
+    const r = await axios.get(`${mb}/enrollmentCert`, { headers, timeout: 10000 });
+    const list = r.data.list || r.data.enrollmentCerts || r.data || [];
+    res.json(list);
+  } catch (err) {
+    res.status(400).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// GET /api/zpa/provisioning-keys — list existing provisioning keys
+router.get('/provisioning-keys', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
+  try {
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
+    const mb = mgmtBase(base, customerId);
+    const r = await axios.get(`${mb}/associationType/CONNECTOR_GRP/provisioningKey`, { headers, timeout: 10000 });
+    const list = r.data.list || r.data || [];
+    res.json(list);
+  } catch (err) {
+    res.status(400).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// POST /api/zpa/provisioning-keys — create a new provisioning key
+router.post('/provisioning-keys', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain,
+    customerId, name, maxUsage, connectorGroupId, enrollmentCertId } = req.body;
+  try {
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
+    const mb = mgmtBase(base, customerId);
+    const r = await axios.post(`${mb}/associationType/CONNECTOR_GRP/provisioningKey`, {
+      name,
+      maxUsage: maxUsage || '10',
+      appConnectorGroupId: connectorGroupId,
+      enrollmentCertId,
+      zcomponentId: connectorGroupId,
+    }, { headers, timeout: 15000 });
+    res.json(r.data);
+  } catch (err) {
+    res.status(400).json({ error: err.response?.data?.message || err.message, raw: err.response?.data });
+  }
+});
+
+// POST /api/zpa/connector-groups — create a new connector group
+router.post('/connector-groups', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain,
+    customerId, name, description, latitude, longitude, location } = req.body;
+  try {
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
+    const mb = mgmtBase(base, customerId);
+    const r = await axios.post(`${mb}/appConnectorGroup`, {
+      name,
+      description: description || 'App Scanner connector group — created by ZPA Shield Deployer',
+      latitude: latitude || '37.3382',
+      longitude: longitude || '-121.8863',
+      location: location || 'San Jose, CA',
+      upgradeDay: 'SUNDAY',
+      upgradeTimeInSecs: '66600',
+      overrideVersionProfile: true,
+      versionProfileId: '0',
+      dnsQueryType: 'IPV4_IPV6',
+    }, { headers, timeout: 15000 });
+    res.json(r.data);
+  } catch (err) {
+    res.status(400).json({ error: err.response?.data?.message || err.message, raw: err.response?.data });
+  }
+});
+
