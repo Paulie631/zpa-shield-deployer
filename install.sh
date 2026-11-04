@@ -102,16 +102,33 @@ npm run dev
 LAUNCHER
 chmod +x "$INSTALL_DIR/start.sh"
 
-# --- macOS: create app shortcut in /usr/local/bin ---
+# --- macOS: create app shortcut ---
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  SHORTCUT="/usr/local/bin/zpa-shield"
+  # Try /usr/local/bin first, fall back to ~/bin
+  if [ -w "/usr/local/bin" ]; then
+    SHORTCUT="/usr/local/bin/zpa-shield"
+  else
+    mkdir -p "$HOME/bin"
+    SHORTCUT="$HOME/bin/zpa-shield"
+    # Add ~/bin to PATH if not already there
+    if ! echo "$PATH" | grep -q "$HOME/bin"; then
+      for RCFILE in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+        if [ -f "$RCFILE" ]; then
+          echo '' >> "$RCFILE"
+          echo '# Added by ZPA Shield Deployer installer' >> "$RCFILE"
+          echo 'export PATH="$HOME/bin:$PATH"' >> "$RCFILE"
+          break
+        fi
+      done
+    fi
+  fi
   cat > "$SHORTCUT" << SHORTCUTSCRIPT
 #!/bin/bash
 cd "$INSTALL_DIR"
 npm run dev
 SHORTCUTSCRIPT
-  chmod +x "$SHORTCUT" 2>/dev/null || true
-  echo -e "${GREEN}✓ macOS shortcut created: ${BLUE}zpa-shield${NC}"
+  chmod +x "$SHORTCUT"
+  echo -e "${GREEN}✓ macOS shortcut created: ${BLUE}${SHORTCUT}${NC}"
 fi
 
 # --- Done ---
@@ -125,7 +142,7 @@ echo -e "    ${YELLOW}— or —${NC}"
 echo -e "    bash $INSTALL_DIR/start.sh"
 if [[ "$OSTYPE" == "darwin"* ]]; then
   echo -e "    ${YELLOW}— or —${NC}"
-  echo -e "    zpa-shield"
+  echo -e "    ${SHORTCUT}"
 fi
 echo ""
 echo -e "  Then open: ${BLUE}http://localhost:3000${NC}"
