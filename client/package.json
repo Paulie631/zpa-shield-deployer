@@ -1,0 +1,18 @@
+{
+  "name": "zpa-shield-deployer-client",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4",
+    "vite": "^5"
+  }
+}
