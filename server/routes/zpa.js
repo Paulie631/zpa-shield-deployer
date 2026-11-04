@@ -31,6 +31,21 @@ async function getOneApiToken(clientId, clientSecret, vanityDomain) {
   return res.data.access_token;
 }
 
+// Get a legacy ZPA token via config.{zpaCloud}/signin (used by config.zpatwo.net etc.)
+async function getZpaLegacyToken(clientId, clientSecret, zpaHost) {
+  const signinUrl = zpaHost + '/signin';
+  console.log('[getZpaLegacyToken] POST', signinUrl);
+  const params = new URLSearchParams({ client_id: clientId, client_secret: clientSecret });
+  const r = await axios.post(signinUrl, params.toString(), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    timeout: 10000,
+  });
+  const token = r.data.token || r.data.access_token || r.data.Bearer;
+  if (!token) throw new Error('ZPA signin returned no token: ' + JSON.stringify(r.data));
+  console.log('[getZpaLegacyToken] got token prefix:', token.slice(0, 20) + '...');
+  return token;
+}
+
 /**
  * Returns { headers, base } ready to make ZPA API calls.
  * authMode: 'apikey' | 'oauth' | 'oneapi'
@@ -100,12 +115,25 @@ async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, 
       const gwHost = ONEAPI_GATEWAY[cloudEnv] || 'https://api.zsapi.net';
       console.log('[getClient oneapi] zpaHost:', zpaHost, 'gwHost:', gwHost, 'customerId:', customerId, 'token:', token.slice(0, 20) + '...');
 
+      // config.zpatwo.net (and all ZPA config hosts) require a LEGACY ZPA token from /signin,
+      // not a OneAPI Bearer JWT. Get a legacy token using the same client credentials.
+      let mgmtHeaders;
+      try {
+        const legacyToken = await getZpaLegacyToken(clientId, clientSecret, zpaHost);
+        mgmtHeaders = { Authorization: `Bearer ${legacyToken}`, 'Content-Type': 'application/json' };
+        console.log('[getClient oneapi] using legacy ZPA token for mgmtBase calls');
+      } catch (legacyErr) {
+        console.warn('[getClient oneapi] legacy ZPA signin failed, falling back to OneAPI token:', legacyErr.message);
+        mgmtHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+      }
+
       const mgmtBase = zpaHost + '/zpa/mgmtconfig/v1/admin/customers/' + (customerId || '');
       return {
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: mgmtHeaders,        // legacy ZPA token for mgmtconfig calls
         base: mgmtBase,
         mgmtBase,
         zpaHost,
+        oneapiHeaders: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       };
     }
     default:
@@ -132,8 +160,6 @@ router.get('/validate', async (req, res) => {
       };
       const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
       if (!token) throw new Error('Failed to obtain OneAPI token');
-      headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-
       // Auto-detect ZPA host from token audience
       let zpaHost = ZPA_HOST_MAP[cloudEnv] || 'https://config.private.zscaler.com';
       try {
@@ -144,6 +170,12 @@ router.get('/validate', async (req, res) => {
         if (zpaAud) { zpaHost = 'https://' + zpaAud.replace('ZPA.', 'config.'); }
       } catch(e) {}
       console.log('[validate oneapi] zpaHost:', zpaHost);
+
+      // config.zpatwo.net requires legacy ZPA token, not OneAPI JWT
+      let legacyToken;
+      try { legacyToken = await getZpaLegacyToken(clientId, clientSecret, zpaHost); } catch(e) {}
+      headers = { Authorization: `Bearer ${legacyToken || token}`, 'Content-Type': 'application/json' };
+      if (legacyToken) console.log('[validate oneapi] using legacy ZPA token');
 
       // Discover customer(s) for this token
       const custRes = await axios.get(zpaHost + '/zpa/mgmtconfig/v1/admin/customers', { headers, timeout: 10000 })
@@ -345,7 +377,9 @@ router.get('/customer', async (req, res) => {
         const zpaAud = audList.find(a => a && a.startsWith('ZPA.'));
         if (zpaAud) { zpaHost = 'https://' + zpaAud.replace('ZPA.', 'config.'); }
       } catch(e) {}
-      const r = await axios.get(zpaHost + '/zpa/mgmtconfig/v1/admin/customers', { headers, timeout: 8000 });
+      let legacyTok; try { legacyTok = await getZpaLegacyToken(clientId, clientSecret, zpaHost); } catch(e) {}
+      const custHeaders = { Authorization: `Bearer ${legacyTok || token}`, 'Content-Type': 'application/json' };
+      const r = await axios.get(zpaHost + '/zpa/mgmtconfig/v1/admin/customers', { headers: custHeaders, timeout: 8000 });
       const custList = r.data.list || r.data.customers || r.data || [];
       const first = Array.isArray(custList) ? custList[0] : custList;
       return res.json({ id: first?.id || first?.customerId, raw: r.data });
