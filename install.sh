@@ -8,6 +8,15 @@ set -euo pipefail
 
 REPO="Paulie631/zpa-shield-deployer"
 INSTALL_DIR="$HOME/zpa-shield-deployer"
+AUTO_YES=false
+
+# Parse flags
+for arg in "$@"; do
+  case $arg in
+    -y|--yes) AUTO_YES=true ;;
+    --dir=*) INSTALL_DIR="${arg#*=}" ;;
+  esac
+done
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
@@ -66,10 +75,14 @@ echo -e "${GREEN}✓ Downloaded${NC}"
 # --- Install ---
 if [ -d "$INSTALL_DIR" ]; then
   echo -e "${YELLOW}⚠ Existing installation found at $INSTALL_DIR${NC}"
-  read -p "  Overwrite? (y/N): " CONFIRM
-  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-    echo "Cancelled."
-    exit 0
+  if [ "$AUTO_YES" = true ]; then
+    echo "  Auto-overwriting (-y flag)"
+  else
+    read -p "  Overwrite? (y/N): " CONFIRM
+    if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+      echo "Cancelled."
+      exit 0
+    fi
   fi
   rm -rf "$INSTALL_DIR"
 fi
