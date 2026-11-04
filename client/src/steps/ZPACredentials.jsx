@@ -68,6 +68,7 @@ export default function ZPACredentials({ data, update, next }) {
   const validate = async () => {
     setLoading(true)
     setError('')
+    console.log('[ZPA] validate called, authMode:', authMode, 'vanityDomain:', JSON.stringify(vanityDomain), 'cloudEnv:', cloudEnv)
     try {
       const params = { authMode }
       if (!isOneApi) params.tenantUrl = tenantUrl
