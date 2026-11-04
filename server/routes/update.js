@@ -104,7 +104,14 @@ router.post('/apply', async (req, res) => {
 
 // GET /api/update/version
 router.get('/version', (req, res) => {
-  res.json({ version: CURRENT_VERSION });
+  try {
+    const pkgPath = require('path').resolve(__dirname, '../../package.json');
+    delete require.cache[require.resolve(pkgPath)];
+    const { version } = require(pkgPath);
+    res.json({ version });
+  } catch (e) {
+    res.json({ version: CURRENT_VERSION });
+  }
 });
 
 function downloadFile(url, dest) {
