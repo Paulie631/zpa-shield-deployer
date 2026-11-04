@@ -77,6 +77,15 @@ echo -e "${BLUE}→ Downloading ${VERSION}...${NC}"
 curl -sL "$ZIP_URL" -o "$TMP_ZIP"
 echo -e "${GREEN}✓ Downloaded${NC}"
 
+# --- Kill any running instance before install ---
+if lsof -ti :3001 > /dev/null 2>&1 || lsof -ti :3000 > /dev/null 2>&1; then
+  echo -e "${YELLOW}→ Stopping existing ZPA Shield Deployer processes...${NC}"
+  lsof -ti :3001 | xargs kill -9 2>/dev/null
+  lsof -ti :3000 | xargs kill -9 2>/dev/null
+  sleep 1
+  echo -e "${GREEN}✓ Old processes stopped${NC}"
+fi
+
 # --- Install ---
 if [ -d "$INSTALL_DIR" ]; then
   echo -e "${YELLOW}⚠ Existing installation found at $INSTALL_DIR${NC}"
@@ -110,6 +119,10 @@ cat > "$INSTALL_DIR/start.sh" << 'LAUNCHER'
 #!/bin/bash
 cd "$(dirname "$0")"
 echo "🛡️  Starting ZPA Shield Deployer..."
+# Kill any old instances on these ports first
+lsof -ti :3001 | xargs kill -9 2>/dev/null
+lsof -ti :3000 | xargs kill -9 2>/dev/null
+sleep 1
 echo "   Frontend: http://localhost:3000"
 echo "   Backend:  http://localhost:3001"
 echo ""
@@ -150,7 +163,7 @@ PLIST
   ESCAPED_DIR=$(printf '%s' "$INSTALL_DIR" | sed "s/'/'\\\\''/g")
   cat > "$APP_MACOS/launcher" << LAUNCHER
 #!/bin/bash
-osascript -e 'tell application "Terminal" to do script "cd '"$ESCAPED_DIR"' && npm run dev"'
+osascript -e 'tell application "Terminal" to do script "lsof -ti :3001 | xargs kill -9 2>/dev/null; lsof -ti :3000 | xargs kill -9 2>/dev/null; sleep 1; cd '"$ESCAPED_DIR"' && npm run dev"'
 sleep 3 && open http://localhost:3000
 LAUNCHER
   chmod +x "$APP_MACOS/launcher"
