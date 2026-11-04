@@ -1,7 +1,12 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 
-const CS_STORAGE_KEY = 'zpa-sh-cs-creds'
+const CS_STORAGE_KEY = 'zpa-cs-creds'
+const PROJECT_ID     = 'PRotcbPOeZ9_Dd4lJww1o-6A2'
+const BP_APP_SCANNER = 'BPps02yDq1W9eCQwn3xyjMgQ2'
+const BP_NAME        = 'App Connector Base'
+const REGION_MIAMI   = 'REKolD1-ab84YIxODeMGob9A2'
+const POLICY_ID      = 'POEsi2O9SdO2D3GM-EZWuD6g2'
 
 function loadCSCreds() {
   try { return JSON.parse(localStorage.getItem(CS_STORAGE_KEY) || '{}') } catch { return {} }
@@ -11,13 +16,16 @@ function saveCSCreds(obj) {
 }
 
 const STATUS_COLOR = {
-  'Ready': '#16a34a',
-  'Running': '#16a34a',
-  'Suspended': '#d97706',
-  'Preparing': '#2563eb',
-  'Creating': '#2563eb',
-  'Stopping': '#d97706',
+  'Ready': '#16a34a', 'Running': '#16a34a',
+  'Suspended': '#d97706', 'Preparing': '#2563eb',
+  'Creating': '#2563eb', 'Stopping': '#d97706', 'Loading from snapshot': '#2563eb',
 }
+
+const REGIONS = [
+  { id: 'REKolD1-ab84YIxODeMGob9A2',  label: '🇺🇸 US East (Miami)' },
+  { id: 'RE0YOUV7_lTmgb0X8D1UjM3g2',  label: '🇸🇬 Asia Pacific (Singapore)' },
+  { id: 'RE6OEZs-y-mkK1mEMGwIgZiw2',  label: '🇳🇱 EU (Amsterdam)' },
+]
 
 export default function CloudShareConfig({ data, update, next, back }) {
   const saved = loadCSCreds()
@@ -26,26 +34,33 @@ export default function CloudShareConfig({ data, update, next, back }) {
   const [apiKey, setApiKey] = useState(data.csApiKey || saved.apiKey || '')
   const [showKey, setShowKey] = useState(false)
 
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState('')
+  const [loading, setLoading]     = useState(false)
+  const [error, setError]         = useState('')
   const [connected, setConnected] = useState(false)
 
   const [environments, setEnvironments] = useState([])
   const [selectedEnv, setSelectedEnv]   = useState(data.csEnvId || '')
   const [envDetail, setEnvDetail]       = useState(null)
   const [loadingEnv, setLoadingEnv]     = useState(false)
+  const [selectedVm, setSelectedVm]     = useState(data.csVmId || '')
 
-  const [selectedVm, setSelectedVm] = useState(data.csVmId || '')
+  // Create-new-env state
+  const [showCreate, setShowCreate]     = useState(false)
+  const [createRegion, setCreateRegion] = useState(REGION_MIAMI)
+  const [creating, setCreating]         = useState(false)
+  const [createStatus, setCreateStatus] = useState('')
+  const pollRef = useRef(null)
 
-  // Persist creds
   useEffect(() => {
     if (apiId || apiKey) saveCSCreds({ apiId, apiKey })
   }, [apiId, apiKey])
 
-  // Auto-connect if creds already saved
   useEffect(() => {
     if (apiId && apiKey && !connected) connect()
   }, [])
+
+  // Cleanup poll on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   const connect = async () => {
     setLoading(true); setError('')
@@ -53,15 +68,10 @@ export default function CloudShareConfig({ data, update, next, back }) {
       const res = await axios.get('/api/cloudshare/validate', { params: { apiId, apiKey } })
       setEnvironments(res.data.environments || [])
       setConnected(true)
-      // Auto-select first env if only one
-      if (res.data.environments?.length === 1) {
-        setSelectedEnv(res.data.environments[0].id)
-      }
+      if (res.data.environments?.length === 1) setSelectedEnv(res.data.environments[0].id)
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Connection failed')
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   // Load env detail when env selected
@@ -71,8 +81,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
     axios.get(`/api/cloudshare/envs/${selectedEnv}`, { params: { apiId, apiKey } })
       .then(r => {
         setEnvDetail(r.data)
-        // Auto-select first Linux/RHEL VM if present
-        const linuxVm = r.data.vms?.find(v => /linux|rhel|centos|fedora/i.test(v.os || '') || /linux|rhel/i.test(v.name || ''))
+        const linuxVm = r.data.vms?.find(v => /linux|rhel|centos|fedora/i.test(v.os || '') || /linux|rhel|el9|connector/i.test(v.name || ''))
         if (linuxVm) setSelectedVm(linuxVm.id)
         else if (r.data.vms?.length === 1) setSelectedVm(r.data.vms[0].id)
       })
@@ -80,9 +89,65 @@ export default function CloudShareConfig({ data, update, next, back }) {
       .finally(() => setLoadingEnv(false))
   }, [selectedEnv, connected])
 
-  const selectedVmDetail = envDetail?.vms?.find(v => v.id === selectedVm)
+  // Create new environment from App Connector Base blueprint
+  const createEnvironment = async () => {
+    setCreating(true); setError(''); setCreateStatus('🚀 Creating environment from App Connector Base blueprint...')
+    try {
+      const res = await axios.post('/api/cloudshare/envs', {
+        apiId, apiKey,
+        projectId: PROJECT_ID,
+        policyId:  POLICY_ID,
+        blueprintId: BP_APP_SCANNER,
+        regionId: createRegion,
+        envName: 'ZPA App Scanner',
+        description: 'RHEL 9 App Scanner — created by ZPA Shield Deployer',
+      })
 
-  const canContinue = connected && selectedEnv && selectedVm && selectedVmDetail
+      const newEnvId = res.data.environmentId
+      if (!newEnvId) throw new Error('No environmentId returned')
+
+      setCreateStatus('⏳ Environment created — waiting for VM to become ready (usually 2–4 min)...')
+      setShowCreate(false)
+
+      // Reload environments list
+      const envsRes = await axios.get('/api/cloudshare/validate', { params: { apiId, apiKey } })
+      setEnvironments(envsRes.data.environments || [])
+      setSelectedEnv(newEnvId)
+
+      // Poll until Ready
+      let attempts = 0
+      pollRef.current = setInterval(async () => {
+        attempts++
+        try {
+          const detail = await axios.get(`/api/cloudshare/envs/${newEnvId}`, { params: { apiId, apiKey } })
+          const st = detail.data.statusText
+          const vmSt = detail.data.vms?.[0]?.statusText || ''
+          setCreateStatus(`⏳ Environment: ${st} | VM: ${vmSt} — please wait...`)
+
+          if (st === 'Ready' && (vmSt === 'Running' || vmSt === 'Ready')) {
+            clearInterval(pollRef.current)
+            setCreateStatus('')
+            setCreating(false)
+            setEnvDetail(detail.data)
+            const vm = detail.data.vms?.[0]
+            if (vm) setSelectedVm(vm.id)
+          } else if (attempts > 60) { // 5 min timeout
+            clearInterval(pollRef.current)
+            setCreateStatus('⚠️ VM is taking longer than expected — check CloudShare portal, then refresh this page.')
+            setCreating(false)
+          }
+        } catch (e) { /* ignore poll errors */ }
+      }, 5000)
+
+    } catch (err) {
+      setCreating(false)
+      setCreateStatus('')
+      setError(err.response?.data?.error || err.message || 'Failed to create environment')
+    }
+  }
+
+  const selectedVmDetail = envDetail?.vms?.find(v => v.id === selectedVm)
+  const canContinue = connected && selectedEnv && selectedVm && selectedVmDetail && !creating
 
   const handleContinue = () => {
     update({
@@ -93,7 +158,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
       csVmId: selectedVm,
       csVmName: selectedVmDetail?.name,
       csHostname: selectedVmDetail?.externalAddress || selectedVmDetail?.internalAddresses?.[0] || '',
-      csUser: /windows/i.test(selectedVmDetail?.os || '') ? 'administrator' : 'ec2-user',
+      csUser: /windows/i.test(selectedVmDetail?.os || '') ? 'administrator' : 'admin',
       csUsername: selectedVmDetail?.username,
       csPassword: selectedVmDetail?.password,
       csWebAccess: selectedVmDetail?.webAccessUrl,
@@ -105,22 +170,21 @@ export default function CloudShareConfig({ data, update, next, back }) {
     <div className="card">
       <h2>CloudShare Environment</h2>
       <p className="subtitle">
-        Connect your CloudShare account to automatically discover your environments and VMs.
+        Connect your CloudShare account to automatically discover or create your App Scanner VM.
       </p>
 
-      {/* Credentials */}
+      {/* Not yet connected */}
       {!connected ? (
         <div>
           <div className="alert alert-info" style={{ marginBottom: '16px' }}>
             <strong>📋 How this works:</strong>
             <ol style={{ margin: '8px 0 0 0', paddingLeft: '20px', lineHeight: '1.8' }}>
-              <li>Enter your CloudShare API credentials below</li>
-              <li>We'll fetch your environments and VMs automatically</li>
-              <li>Select the VM to deploy the App Scanner on</li>
-              <li>The next step generates a ready-to-run setup script</li>
+              <li>Enter your CloudShare API credentials</li>
+              <li>Pick an existing RHEL 9 VM <em>or</em> let the wizard create one automatically</li>
+              <li>The next step generates a ready-to-run App Scanner setup script</li>
             </ol>
             <div style={{ marginTop: '8px', fontSize: '13px', color: '#64748b' }}>
-              💡 Find your API ID and Key at: <strong>use.cloudshare.com → Profile → API</strong>
+              💡 Find your API ID + Key at: <strong>use.cloudshare.com → Profile → API</strong>
             </div>
           </div>
 
@@ -139,15 +203,14 @@ export default function CloudShareConfig({ data, update, next, back }) {
                 {showKey ? '🙈 Hide' : '👁 Show'}
               </button>
             </div>
-            <div className="hint">Credentials are saved locally in your browser only.</div>
+            <div className="hint">Saved locally in your browser — never sent to any server except CloudShare.</div>
           </div>
 
           {error && <div className="alert alert-error">⚠️ {error}</div>}
 
           <div className="btn-row">
             <button className="btn btn-secondary" onClick={back}>← Back</button>
-            <button className="btn btn-primary" onClick={connect}
-              disabled={!apiId || !apiKey || loading}>
+            <button className="btn btn-primary" onClick={connect} disabled={!apiId || !apiKey || loading}>
               {loading ? '🔄 Connecting...' : '🔌 Connect to CloudShare →'}
             </button>
           </div>
@@ -163,13 +226,20 @@ export default function CloudShareConfig({ data, update, next, back }) {
             </button>
           </div>
 
+          {/* Create status / polling */}
+          {createStatus && (
+            <div className="alert alert-info" style={{ marginBottom: '16px' }}>
+              {createStatus}
+            </div>
+          )}
+
           {/* Environment picker */}
           <div className="form-group">
             <label>Environment <span className="label-required">*</span></label>
             {environments.length === 0 ? (
-              <div className="alert alert-warning">⚠️ No environments found in this account.</div>
+              <div className="alert alert-warning">⚠️ No environments found.</div>
             ) : (
-              <select value={selectedEnv} onChange={e => setSelectedEnv(e.target.value)}>
+              <select value={selectedEnv} onChange={e => setSelectedEnv(e.target.value)} disabled={creating}>
                 <option value="">— Select an environment —</option>
                 {environments.map(env => (
                   <option key={env.id} value={env.id}>{env.name}</option>
@@ -178,13 +248,52 @@ export default function CloudShareConfig({ data, update, next, back }) {
             )}
           </div>
 
-          {/* Env detail + VM picker */}
+          {/* Create new env section */}
+          {!creating && (
+            <div style={{ marginBottom: '20px' }}>
+              {!showCreate ? (
+                <button
+                  onClick={() => setShowCreate(true)}
+                  style={{ fontSize: '13px', padding: '6px 14px', background: 'none', border: '1px solid #2563eb', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}>
+                  ➕ Create new RHEL 9 VM from <strong>{BP_NAME}</strong> blueprint
+                </button>
+              ) : (
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '16px', marginTop: '8px' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '12px' }}>🚀 Create new App Scanner environment</div>
+                  <div style={{ fontSize: '13px', color: '#475569', marginBottom: '12px' }}>
+                    Creates a new environment from the <strong>{BP_NAME}</strong> blueprint —
+                    a RHEL 9 Linux VM pre-configured for Zscaler connectors.
+                    Takes about 2–4 minutes.
+                  </div>
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label style={{ fontSize: '13px' }}>Region</label>
+                    <select value={createRegion} onChange={e => setCreateRegion(e.target.value)}>
+                      {REGIONS.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button className="btn btn-primary" onClick={createEnvironment} style={{ fontSize: '13px' }}>
+                      🚀 Create Environment
+                    </button>
+                    <button onClick={() => setShowCreate(false)}
+                      style={{ fontSize: '13px', padding: '6px 14px', background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VM picker */}
           {selectedEnv && (
-            loadingEnv ? (
-              <div style={{ color: '#64748b', fontSize: '14px', margin: '12px 0' }}>🔄 Loading environment details...</div>
+            loadingEnv || creating ? (
+              <div style={{ color: '#64748b', fontSize: '14px', margin: '12px 0' }}>
+                {creating ? '⏳ Waiting for VM to become ready...' : '🔄 Loading environment details...'}
+              </div>
             ) : envDetail ? (
               <>
-                {/* Env status card */}
+                {/* Env status */}
                 <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px 16px', marginBottom: '16px', fontSize: '13px' }}>
                   <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
                     <span><strong>Status:</strong> <span style={{ color: STATUS_COLOR[envDetail.statusText] || '#64748b' }}>● {envDetail.statusText}</span></span>
@@ -193,7 +302,6 @@ export default function CloudShareConfig({ data, update, next, back }) {
                   </div>
                 </div>
 
-                {/* VM picker */}
                 <div className="form-group">
                   <label>VM to install App Scanner on <span className="label-required">*</span></label>
                   {!envDetail.vms?.length ? (
@@ -207,8 +315,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
                           borderRadius: '10px', cursor: 'pointer', background: selectedVm === vm.id ? '#eff6ff' : '#fff'
                         }}>
                           <input type="radio" name="vm" value={vm.id}
-                            checked={selectedVm === vm.id}
-                            onChange={() => setSelectedVm(vm.id)}
+                            checked={selectedVm === vm.id} onChange={() => setSelectedVm(vm.id)}
                             style={{ marginTop: '2px' }} />
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 600 }}>{vm.name}</div>
@@ -226,7 +333,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
                   )}
                 </div>
 
-                {/* Selected VM connection details */}
+                {/* Connection details */}
                 {selectedVmDetail && (
                   <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '14px 16px', marginBottom: '16px', fontSize: '13px' }}>
                     <div style={{ fontWeight: 600, marginBottom: '8px' }}>✅ VM Connection Details</div>
@@ -244,9 +351,9 @@ export default function CloudShareConfig({ data, update, next, back }) {
                         </div>
                       )}
                     </div>
-                    {!/linux|rhel/i.test(selectedVmDetail.os || '') && (
+                    {!/linux/i.test(selectedVmDetail.os || '') && (
                       <div className="alert alert-warning" style={{ marginTop: '10px' }}>
-                        ⚠️ This VM appears to be <strong>{selectedVmDetail.os}</strong>. App Scanner requires <strong>RHEL 9</strong>. Select a Linux VM or ensure this is RHEL-based.
+                        ⚠️ This VM appears to be <strong>{selectedVmDetail.os}</strong>. App Scanner requires <strong>RHEL 9</strong>.
                       </div>
                     )}
                   </div>

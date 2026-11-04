@@ -84,6 +84,17 @@ router.get('/envs/:envId', async (req, res) => {
   }
 });
 
+// GET /api/cloudshare/policies
+router.get('/policies', async (req, res) => {
+  const { apiId, apiKey, projectId } = req.query;
+  try {
+    const policies = await csGet(apiId, apiKey, `/api/v3/projects/${projectId}/policies`);
+    res.json(policies);
+  } catch (err) {
+    res.status(400).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
 // GET /api/cloudshare/blueprints — list blueprints for a project
 router.get('/blueprints', async (req, res) => {
   const { apiId, apiKey, projectId } = req.query;
@@ -108,16 +119,17 @@ router.get('/regions', async (req, res) => {
 
 // POST /api/cloudshare/envs — create environment from blueprint
 router.post('/envs', async (req, res) => {
-  const { apiId, apiKey, projectId, blueprintId, regionId, envName, description } = req.body;
+  const { apiId, apiKey, projectId, policyId, blueprintId, regionId, envName, description } = req.body;
   try {
     const body = {
       environment: {
         projectId,
-        blueprintId,
+        policyId,
         regionId: regionId || undefined,
-        name: envName || 'ZPA Shield Scanner',
+        name: envName || 'ZPA App Scanner',
         description: description || 'Created by ZPA Shield Deployer',
       },
+      itemsCart: [{ type: 1, blueprintId }],
     };
     const result = await csPost(apiId, apiKey, '/api/v3/envs', body);
     res.json(result);
