@@ -67,7 +67,12 @@ fi
 echo -e "${GREEN}✓ Latest version: ${VERSION}${NC}"
 
 # --- Download ---
+# --- Clean up any leftover temp files first ---
+rm -f /tmp/zpa-shield-*.zip 2>/dev/null || true
+rm -rf /tmp/zpa-shield-extract-* 2>/dev/null || true
+
 TMP_ZIP=$(mktemp /tmp/zpa-shield-XXXXXX.zip)
+TMP_EXTRACT=$(mktemp -d /tmp/zpa-shield-extract-XXXXXX)
 echo -e "${BLUE}→ Downloading ${VERSION}...${NC}"
 curl -sL "$ZIP_URL" -o "$TMP_ZIP"
 echo -e "${GREEN}✓ Downloaded${NC}"
@@ -88,7 +93,6 @@ if [ -d "$INSTALL_DIR" ]; then
 fi
 
 mkdir -p "$INSTALL_DIR"
-TMP_EXTRACT=$(mktemp -d /tmp/zpa-shield-extract-XXXXXX)
 unzip -q "$TMP_ZIP" -d "$TMP_EXTRACT"
 EXTRACTED_DIR=$(ls "$TMP_EXTRACT" | head -1)
 cp -r "$TMP_EXTRACT/$EXTRACTED_DIR/." "$INSTALL_DIR/"
