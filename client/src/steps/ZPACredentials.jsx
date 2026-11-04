@@ -173,11 +173,13 @@ export default function ZPACredentials({ data, update, next }) {
                 type="text"
                 placeholder="yourcompany"
                 value={vanityDomain}
-                onChange={e => setVanityDomain(e.target.value.trim().toLowerCase())}
+                onChange={e => setVanityDomain(e.target.value.toLowerCase())}
+                onBlur={e => setVanityDomain(e.target.value.trim().toLowerCase())}
               />
               <span className="input-suffix">.zslogin.net</span>
             </div>
             <div className="hint">Your Zscaler company slug. If your login URL is <strong>acme.zslogin.net</strong>, enter <strong>acme</strong>. Found on your OneAPI client page.</div>
+            {vanityDomain && <div className="hint" style={{color:'#16a34a',fontWeight:600}}>✓ Token endpoint: https://{vanityDomain}.zslogin.net/oauth2/v1/token</div>}
           </div>
           <div className="form-group">
             <label>Cloud Environment <span className="label-required">*</span></label>
