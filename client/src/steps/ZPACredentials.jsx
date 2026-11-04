@@ -46,14 +46,25 @@ function stripUrl(raw) {
   return raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim()
 }
 
+const STORAGE_KEY = 'zpa-shield-credentials'
+
+function loadSaved() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') } catch { return {} }
+}
+
+function saveCreds(obj) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)) } catch {}
+}
+
 export default function ZPACredentials({ data, update, next }) {
-  const [authMode, setAuthMode] = useState(data.authMode || 'apikey')
-  const [tenantUrl, setTenantUrl] = useState(data.tenantUrl || '')
-  const [apiKey, setApiKey] = useState(data.apiKey || '')
-  const [clientId, setClientId] = useState(data.clientId || '')
-  const [clientSecret, setClientSecret] = useState(data.clientSecret || '')
-  const [cloudEnv, setCloudEnv] = useState(data.cloudEnv || 'zscaler.com')
-  const [vanityDomain, setVanityDomain] = useState(data.vanityDomain || '')
+  const saved = loadSaved()
+  const [authMode, setAuthMode] = useState(data.authMode || saved.authMode || 'apikey')
+  const [tenantUrl, setTenantUrl] = useState(data.tenantUrl || saved.tenantUrl || '')
+  const [apiKey, setApiKey] = useState(data.apiKey || saved.apiKey || '')
+  const [clientId, setClientId] = useState(data.clientId || saved.clientId || '')
+  const [clientSecret, setClientSecret] = useState(data.clientSecret || saved.clientSecret || '')
+  const [cloudEnv, setCloudEnv] = useState(data.cloudEnv || saved.cloudEnv || 'zscaler.com')
+  const [vanityDomain, setVanityDomain] = useState(data.vanityDomain || saved.vanityDomain || '')
   const [showApiKey, setShowApiKey] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -61,6 +72,16 @@ export default function ZPACredentials({ data, update, next }) {
 
   const guide = GUIDES[authMode]
   const isOneApi = authMode === 'oneapi'
+
+  // Save to localStorage whenever any credential field changes
+  React.useEffect(() => {
+    saveCreds({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain })
+  }, [authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain])
+
+  const clearSaved = () => {
+    localStorage.removeItem(STORAGE_KEY)
+    setTenantUrl(''); setApiKey(''); setClientId(''); setClientSecret(''); setVanityDomain('')
+  }
 
   const canSubmit = (isOneApi ? (clientId && clientSecret && vanityDomain) : tenantUrl) &&
     (authMode === 'apikey' ? apiKey : clientId && clientSecret)
@@ -116,7 +137,16 @@ export default function ZPACredentials({ data, update, next }) {
         Enter your ZPA tenant details. We'll verify the connection and load your App Connector groups and app segments.
       </p>
 
-      <div className="disclaimer">🔒 Credentials are used only for this session and are never stored or logged.</div>
+      <div className="disclaimer">🔒 Credentials are saved locally in your browser only — never sent to any server except ZPA.</div>
+      {Object.keys(loadSaved()).length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '8px 0', fontSize: '13px', color: '#16a34a' }}>
+          <span>✓ Credentials remembered from last session</span>
+          <button
+            onClick={clearSaved}
+            style={{ fontSize: '12px', padding: '2px 8px', background: 'none', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', color: '#64748b' }}
+          >Clear saved</button>
+        </div>
+      )}
 
       {/* Auth mode selector */}
       <div className="form-group">
