@@ -14,12 +14,22 @@ async function getTenantToken(tenantUrl, clientId, clientSecret) {
 }
 
 // Zidentity OAuth for OneAPI
-async function getOneApiToken(clientId, clientSecret) {
-  const res = await axios.post('https://id.zscaler.com/oauth2/v1/token', null, {
-    params: { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret },
-    timeout: 10000
-  });
-  return res.data.access_token;
+async function getOneApiToken(clientId, clientSecret, cloudEnv) {
+  // Token endpoint is on the same cloud domain as the API
+  const envTokenMap = {
+    'zscaler.com':        'https://api.zscaler.com/oauth2/v1/token',
+    'zscalertwo.net':     'https://api.zscalertwo.net/oauth2/v1/token',
+    'zscalerthree.net':   'https://api.zscalerthree.net/oauth2/v1/token',
+    'zscloud.net':        'https://api.zscloud.net/oauth2/v1/token',
+    'zscalerone.net':     'https://api.zscalerone.net/oauth2/v1/token',
+    'zscalerbeta.net':    'https://api.zscalerbeta.net/oauth2/v1/token',
+  }
+  const tokenUrl = envTokenMap[cloudEnv] || 'https://api.zscaler.com/oauth2/v1/token'
+  const res = await axios.post(tokenUrl,
+    new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }).toString(),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
+  )
+  return res.data.access_token
 }
 
 /**
@@ -42,7 +52,7 @@ async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, 
       };
     }
     case 'oneapi': {
-      const token = await getOneApiToken(clientId, clientSecret);
+      const token = await getOneApiToken(clientId, clientSecret, cloudEnv);
       // OneAPI base varies by cloud env — default to zscaler.com
       const envMap = {
         'zscaler.com':   'https://api.zscaler.com/zpa/v1',

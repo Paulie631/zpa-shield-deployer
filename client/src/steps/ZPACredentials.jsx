@@ -32,12 +32,12 @@ const GUIDES = {
   oneapi: {
     title: 'Where to find your OneAPI credentials',
     steps: [
-      'Log in to Zidentity (id.zscaler.com) as an admin',
-      'Go to Applications → OAuth 2.0 Clients',
-      'Create a new client with ZPA scopes, copy the Client ID and Secret',
-      'Select the Cloud Environment that matches your ZPA tenant below',
+      'Go to console.zscaler.com and log in as an admin',
+      'Navigate to Private Access → Client Credentials (or use the direct URL: console.zscaler.com/private/client-credentials)',
+      'Click Add Client, set grant type to Client Credentials, copy the Client ID and Secret',
+      'Select the Cloud Environment below that matches your ZPA tenant',
     ],
-    docsUrl: 'https://help.zscaler.com/zidentity/about-oneapi'
+    docsUrl: 'https://automate.zscaler.com/docs/getting-started/getting-started'
   }
 }
 
