@@ -166,22 +166,33 @@ module.exports = router;
 // ─── Provisioning / Setup routes ─────────────────────────────────────────────
 
 // Helper: build mgmtconfig base
-// For OneAPI: base is https://api.zscaler.com/zpa/v1
-//   with customerId: https://api.zscaler.com/zpa/mgmtconfig/v1/admin/customers/{id}
-//   without customerId: fall back to /zpa/v1 (works for list endpoints)
-// For legacy: base is https://{tenant}/api/v1
-//   mgmtconfig: https://{tenant}/mgmtconfig/v1/admin/customers/{id}
+// mgmtconfig ALWAYS lives at config.private.zscaler.com regardless of auth mode
+// OneAPI token is accepted there too
 function mgmtBase(base, customerId) {
-  if (!customerId) {
-    // No customerId — use the base path directly (works for GET lists on legacy + OneAPI)
-    return base;
+  if (!customerId) return base; // fallback: use validate-style base (works for some list endpoints)
+  // Determine the mgmtconfig host from the base URL
+  // Legacy:  https://{tenant}.private.zscaler.com/api/v1  -> https://{tenant}.private.zscaler.com/mgmtconfig/v1/admin/customers/{id}
+  // OneAPI:  https://api.zscaler.com/zpa/v1               -> https://config.private.zscaler.com/mgmtconfig/v1/admin/customers/{id}
+  // (OneAPI Bearer tokens are accepted by config.private.zscaler.com)
+  const envHostMap = {
+    'api.zscaler.com':        'config.private.zscaler.com',
+    'api.zscalertwo.net':     'config.zpatwo.net',
+    'api.zscalerthree.net':   'config.zpathree.net',
+    'api.zscloud.net':        'config.zscloud.net',
+    'api.zscalerone.net':     'config.zscalerone.net',
+    'api.zscalerbeta.net':    'config.zpabeta.net',
+    'api.zscalergov.net':     'config.zpagov.net',
+  };
+  let configHost = 'config.private.zscaler.com'; // default
+  for (const [apiHost, cfgHost] of Object.entries(envHostMap)) {
+    if (base.includes(apiHost)) { configHost = cfgHost; break; }
   }
-  if (base.includes('api.zscaler') || base.includes('api.zscalertwo') || base.includes('api.zscloud') || base.includes('api.zscalerone') || base.includes('api.zscalerthree') || base.includes('api.zscalerbeta')) {
-    // OneAPI: swap /zpa/v1 for /zpa/mgmtconfig/v1/admin/customers/{id}
-    return base.replace(/\/zpa\/v1.*$/, '') + `/zpa/mgmtconfig/v1/admin/customers/${customerId}`;
+  // If base is already a legacy tenant URL (e.g. acme.private.zscaler.com), use it directly
+  if (!base.includes('api.zscaler') && !base.includes('api.zscloud') && !base.includes('api.zscalerone')) {
+    const legacyHost = base.replace(/^https:\/\//, '').split('/')[0];
+    configHost = legacyHost;
   }
-  // Legacy: swap /api/v1 for /mgmtconfig/v1/admin/customers/{id}
-  return base.replace(/\/api\/v1.*$/, '') + `/mgmtconfig/v1/admin/customers/${customerId}`;
+  return `https://${configHost}/mgmtconfig/v1/admin/customers/${customerId}`;
 }
 
 // GET /api/zpa/customer — get customer/tenant info (for customerId)
