@@ -202,7 +202,7 @@ export default function ZPASetup({ data, update, next, back }) {
               Then <button onClick={() => loadAll(customerId)} style={{ fontSize: '12px', padding: '2px 8px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: 'none' }}>Retry</button>
               &nbsp;or switch to <strong>API Key</strong> auth mode on step 1 to bypass this.
             </>
-          ) : loadError.includes('bad.request') ? (
+          ) : (loadError.includes('bad.request') || (authParams.authMode === 'oneapi' && (loadError.includes('400') || loadError.includes('bad request')))) ? (
             <>
               <strong>🚫 OneAPI tokens not accepted by ZPA mgmtconfig</strong><br/>
               The ZPA management API on <code>config.zpatwo.net</code> requires a <strong>ZPA API Key</strong>, not a OneAPI/Zidentity Bearer token.<br/>

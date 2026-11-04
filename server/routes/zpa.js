@@ -217,7 +217,7 @@ router.get('/validate', async (req, res) => {
     res.json({ valid: true, authMode, base, connectorGroups: parseList(cgRes), appSegments: parseList(asRes) });
   } catch (err) {
     console.error('[validate error]', err.response?.status, err.response?.data, err.message);
-    res.status(401).json({ valid: false, error: err.response?.data?.message || err.message });
+    res.status(401).json({ valid: false, error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message });
   }
 });
 // POST /api/zpa/scan
@@ -246,7 +246,7 @@ router.post('/scan', async (req, res) => {
 
     res.json({ scanProfileId, scanId: scanRes.data.id });
   } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message });
+    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message });
   }
 });
 
@@ -268,7 +268,7 @@ router.post('/app-segments', async (req, res) => {
     }
     res.json({ created });
   } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message });
+    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message });
   }
 });
 
@@ -287,7 +287,7 @@ router.get('/connector-groups', async (req, res) => {
     res.json(list);
   } catch (err) {
     console.error('[connector-groups GET error]', err.response?.status, err.config?.url, JSON.stringify(err.response?.data));
-    res.status(400).json({ error: err.response?.data?.message || err.message, url: err.config?.url });
+    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message, url: err.config?.url });
   }
 });
 
@@ -298,7 +298,7 @@ router.get('/server-groups', async (req, res) => {
     const r = await axios.get(mgmtBase + '/serverGroup', { headers, timeout: 10000 });
     const list = r.data.list || r.data.serverGroups || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
-  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.message }); }
+  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message }); }
 });
 
 router.get('/enrollment-certs', async (req, res) => {
@@ -308,7 +308,7 @@ router.get('/enrollment-certs', async (req, res) => {
     const r = await axios.get(mgmtBase + '/enrollmentCert', { headers, timeout: 10000 });
     const list = r.data.list || r.data.enrollmentCerts || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
-  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.message }); }
+  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message }); }
 });
 
 router.get('/provisioning-keys', async (req, res) => {
@@ -318,7 +318,7 @@ router.get('/provisioning-keys', async (req, res) => {
     const r = await axios.get(mgmtBase + '/associationType/CONNECTOR_GRP/provisioningKey', { headers, timeout: 10000 });
     const list = r.data.list || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
-  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.message }); }
+  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message }); }
 });
 
 router.post('/provisioning-keys', async (req, res) => {
@@ -335,7 +335,7 @@ router.post('/provisioning-keys', async (req, res) => {
     }, { headers, timeout: 15000 });
     res.json(r.data);
   } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.message, url: err.config?.url, raw: err.response?.data });
+    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message, url: err.config?.url, raw: err.response?.data });
   }
 });
 
@@ -357,7 +357,7 @@ router.post('/connector-groups', async (req, res) => {
     res.json(r.data);
   } catch (err) {
     console.error('[connector-groups POST error]', err.response?.status, err.config?.url, JSON.stringify(err.response?.data));
-    res.status(400).json({ error: err.response?.data?.message || err.message, url: err.config?.url, raw: err.response?.data });
+    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message, url: err.config?.url, raw: err.response?.data });
   }
 });
 
