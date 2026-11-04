@@ -14,16 +14,29 @@ const APP_ROOT = path.resolve(__dirname, '../../');
 // Checks GitHub releases for a newer version
 router.get('/check', async (req, res) => {
   try {
+    // Read version fresh each time (don't cache at require time)
+    let currentVersion;
+    try {
+      const pkgPath = require('path').resolve(__dirname, '../../package.json');
+      delete require.cache[require.resolve(pkgPath)];
+      currentVersion = require(pkgPath).version;
+    } catch (e) {
+      currentVersion = CURRENT_VERSION;
+    }
+
     const response = await axios.get(
       `https://api.github.com/repos/${REPO}/releases/latest`,
-      { headers: { 'User-Agent': 'zpa-shield-deployer', Accept: 'application/vnd.github+json' } }
+      {
+        headers: { 'User-Agent': 'zpa-shield-deployer', Accept: 'application/vnd.github+json' },
+        timeout: 8000
+      }
     );
     const latest = response.data;
     const latestVersion = latest.tag_name.replace(/^v/, '');
-    const hasUpdate = compareVersions(latestVersion, CURRENT_VERSION) > 0;
+    const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
 
     res.json({
-      currentVersion: CURRENT_VERSION,
+      currentVersion,
       latestVersion,
       hasUpdate,
       releaseNotes: latest.body || '',
@@ -33,7 +46,13 @@ router.get('/check', async (req, res) => {
       zipUrl: latest.assets?.find(a => a.name.endsWith('.zip'))?.browser_download_url || null
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // Return detailed error so the UI can show what actually went wrong
+    const detail = err.response
+      ? `GitHub API error ${err.response.status}: ${JSON.stringify(err.response.data)}`
+      : err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND'
+        ? `Network error (${err.code}) — check internet connection`
+        : err.message;
+    res.status(500).json({ error: detail });
   }
 });
 
