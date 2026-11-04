@@ -10,6 +10,7 @@ app.use('/api/zpa', require('./routes/zpa'));
 app.use('/api/aws', require('./routes/aws'));
 app.use('/api/cloudshare', require('./routes/cloudshare'));
 app.use('/api/testapps', require('./routes/testapps'));
+app.use('/api/update', require('./routes/update'));
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`ZPA Shield Deployer backend running on http://localhost:${PORT}`));

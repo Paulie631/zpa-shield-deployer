@@ -1,4 +1,5 @@
 import React from 'react'
+import UpdateChecker from './UpdateChecker'
 
 export default function WizardShell({ steps, currentStep, children }) {
   return (
@@ -6,6 +7,9 @@ export default function WizardShell({ steps, currentStep, children }) {
       <header className="app-header">
         <span className="shield-icon">🛡️</span>
         <h1>ZPA Autonomous Application Shield — Deployment Wizard</h1>
+        <div style={{ marginLeft: 'auto' }}>
+          <UpdateChecker />
+        </div>
       </header>
       <div className="wizard-container">
         <div className="progress-bar">

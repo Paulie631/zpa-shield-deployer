@@ -37,20 +37,34 @@ A 9-step guided wizard that automates the full ZPA App Shield deployment:
 
 ## Quick Start
 
-### Option A — Download the latest release (recommended)
+### Option A — One-line installer (recommended)
+
+**macOS / Linux:**
+```bash
+curl -sSL https://raw.githubusercontent.com/Paulie631/zpa-shield-deployer/main/install.sh | bash
+```
+Then start it:
+```bash
+bash ~/zpa-shield-deployer/start.sh
+# macOS shortcut also created: zpa-shield
+```
+
+**Windows** — download [`install.bat`](../../releases/latest) from the release and double-click it.
+A desktop shortcut is created automatically.
+
+---
+
+### Option B — Manual install
 
 1. Go to [Releases](../../releases/latest) and download `zpa-shield-deployer-v*.zip`
-2. Unzip and open a terminal in the folder
-3. Run:
+2. Unzip and open a terminal in the folder:
 
 ```bash
 npm run install:all
 npm run dev
 ```
 
-4. Open **http://localhost:3000** in your browser
-
-### Option B — Clone from source
+### Option C — Clone from source
 
 ```bash
 git clone https://github.com/Paulie631/zpa-shield-deployer.git
@@ -58,6 +72,20 @@ cd zpa-shield-deployer
 npm run install:all
 npm run dev
 ```
+
+---
+
+Open **http://localhost:3000** in your browser.
+
+## In-App Updates
+
+Click the **🔄 v1.x.x** button in the top-right corner of the app header to check for updates.
+
+When a new version is available:
+- A orange dot badge appears on the version button
+- Click it to see release notes
+- Click **Install Update** — the app downloads, installs, and restarts automatically
+- Refresh the browser after ~30 seconds
 
 ---
 

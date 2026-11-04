@@ -395,3 +395,100 @@ body {
 
 /* === Divider === */
 .divider { border: none; border-top: 1px solid #E5E7EB; margin: 24px 0; }
+
+/* === Update Checker === */
+.update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1.5px solid rgba(255,255,255,0.35);
+  background: rgba(255,255,255,0.12);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+  white-space: nowrap;
+}
+.update-btn:hover:not(:disabled) { background: rgba(255,255,255,0.22); }
+.update-btn:disabled { opacity: 0.7; cursor: not-allowed; }
+.update-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  background: #f97316;
+  border-radius: 50%;
+  border: 2px solid #0066CC;
+  animation: pulse 1.5s infinite;
+}
+
+/* === Modal === */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+.modal {
+  background: white;
+  border-radius: 14px;
+  padding: 28px 32px;
+  width: 100%;
+  max-width: 520px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal h3 { font-size: 20px; font-weight: 700; color: #0f172a; }
+
+.version-compare {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+}
+.ver-chip {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: monospace;
+}
+.ver-chip.current { background: #F1F5F9; color: #64748b; }
+.ver-chip.latest { background: #D1FAE5; color: #065f46; }
+
+.release-notes {
+  border: 1.5px solid #E5E7EB;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.release-notes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: #F8FAFC;
+  border-bottom: 1px solid #E5E7EB;
+  font-size: 13px;
+}
+.release-notes-body {
+  padding: 12px 14px;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.7;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0;
+}
