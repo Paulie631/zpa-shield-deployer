@@ -119,33 +119,65 @@ npm run dev
 LAUNCHER
 chmod +x "$INSTALL_DIR/start.sh"
 
-# --- macOS: create app shortcut ---
+# --- macOS: create .app bundle on Desktop ---
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  # Try /usr/local/bin first, fall back to ~/bin
-  if [ -w "/usr/local/bin" ]; then
-    SHORTCUT="/usr/local/bin/zpa-shield"
-  else
-    mkdir -p "$HOME/bin"
-    SHORTCUT="$HOME/bin/zpa-shield"
-    # Add ~/bin to PATH if not already there
-    if ! echo "$PATH" | grep -q "$HOME/bin"; then
-      for RCFILE in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
-        if [ -f "$RCFILE" ]; then
-          echo '' >> "$RCFILE"
-          echo '# Added by ZPA Shield Deployer installer' >> "$RCFILE"
-          echo 'export PATH="$HOME/bin:$PATH"' >> "$RCFILE"
-          break
-        fi
-      done
-    fi
-  fi
-  cat > "$SHORTCUT" << SHORTCUTSCRIPT
+  APP="$HOME/Desktop/ZPA Shield Deployer.app"
+  APP_MACOS="$APP/Contents/MacOS"
+  APP_RES="$APP/Contents/Resources"
+
+  rm -rf "$APP"
+  mkdir -p "$APP_MACOS" "$APP_RES"
+
+  # Info.plist
+  cat > "$APP/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>ZPA Shield Deployer</string>
+  <key>CFBundleDisplayName</key><string>ZPA Shield Deployer</string>
+  <key>CFBundleIdentifier</key><string>com.zscaler.zpa-shield-deployer</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundleExecutable</key><string>launcher</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSUIElement</key><false/>
+</dict>
+</plist>
+PLIST
+
+  # Launcher — opens Terminal + browser
+  ESCAPED_DIR=$(printf '%s' "$INSTALL_DIR" | sed "s/'/'\\\\''/g")
+  cat > "$APP_MACOS/launcher" << LAUNCHER
 #!/bin/bash
-cd "$INSTALL_DIR"
-npm run dev
-SHORTCUTSCRIPT
-  chmod +x "$SHORTCUT"
-  echo -e "${GREEN}✓ macOS shortcut created: ${BLUE}${SHORTCUT}${NC}"
+osascript -e 'tell application "Terminal" to do script "cd '"$ESCAPED_DIR"' && npm run dev"'
+sleep 3 && open http://localhost:3000
+LAUNCHER
+  chmod +x "$APP_MACOS/launcher"
+
+  # Generate a simple blue PNG icon with Python3 (built-in macOS)
+  python3 -c "
+import struct, zlib, os
+def png(r,g,b,s=256):
+    rows=b''.join(b'\\x00'+bytes([r,g,b,255]*s) for _ in range(s))
+    def ck(t,d):
+        return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
+    return b'\\x89PNG\\r\\n\\x1a\\n'+ck(b'IHDR',struct.pack('>IIBBBBB',s,s,8,2,0,0,0))+ck(b'IDAT',zlib.compress(rows))+ck(b'IEND',b'')
+p='$APP_RES/AppIcon.png'
+open(p,'wb').write(png(0,102,204))
+"
+
+  # Convert to icns using built-in macOS tools
+  ICONSET="$APP_RES/AppIcon.iconset"
+  mkdir -p "$ICONSET"
+  for SIZE in 16 32 64 128 256 512; do
+    sips -z $SIZE $SIZE "$APP_RES/AppIcon.png" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" &>/dev/null
+    sips -z $((SIZE*2)) $((SIZE*2)) "$APP_RES/AppIcon.png" --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" &>/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP_RES/AppIcon.icns" 2>/dev/null && \
+    rm -rf "$ICONSET" "$APP_RES/AppIcon.png" || true
+
+  echo -e "${GREEN}✓ Desktop icon created: ${BLUE}ZPA Shield Deployer${NC}"
 fi
 
 # --- Done ---
@@ -154,13 +186,11 @@ echo "========================================"
 echo -e "${GREEN}🎉 ZPA Shield Deployer ${VERSION} installed!${NC}"
 echo ""
 echo -e "  ${BLUE}To start:${NC}"
-echo -e "    cd $INSTALL_DIR && npm run dev"
-echo -e "    ${YELLOW}— or —${NC}"
-echo -e "    bash $INSTALL_DIR/start.sh"
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  echo -e "    ${YELLOW}— or —${NC}"
-  echo -e "    ${SHORTCUT}"
+  echo -e "    🖥️  Double-click ${YELLOW}ZPA Shield Deployer${NC} on your Desktop"
+  echo -e "    ${YELLOW}— or from terminal —${NC}"
 fi
+echo -e "    bash $INSTALL_DIR/start.sh"
 echo ""
 echo -e "  Then open: ${BLUE}http://localhost:3000${NC}"
 echo "========================================"
