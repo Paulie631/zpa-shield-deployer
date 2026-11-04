@@ -66,14 +66,46 @@ async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, 
     case 'oneapi': {
       const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
       if (!token) throw new Error('OneAPI token was empty/undefined');
+
+      // Auto-detect ZPA host from token audience claims
+      // Token aud array contains entries like ZPA.zpatwo.net or ZPA.private.zscaler.com
+      // Map: ZPA.zpatwo.net -> config.zpatwo.net (legacy mgmtconfig host for that cloud)
+      let zpaHost = null;
+      try {
+        const parts = token.split('.');
+        const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString());
+        const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+        const zpaAud = audList.find(a => a && a.startsWith('ZPA.'));
+        if (zpaAud) {
+          zpaHost = 'https://' + zpaAud.replace('ZPA.', 'config.');
+          console.log('[getClient oneapi] detected ZPA host from token aud:', zpaHost);
+        }
+      } catch(e) { /* ignore decode errors */ }
+
+      // Fallback: use cloudEnv mapping
+      if (!zpaHost) {
+        const zpaHostMap = {
+          'zscaler.com':     'https://config.private.zscaler.com',
+          'zscalertwo.net':  'https://config.zpatwo.net',
+          'zscalerthree.net':'https://config.zpathree.net',
+          'zscloud.net':     'https://config.zscloud.net',
+          'zscalerbeta.net': 'https://config.zpabeta.net',
+          'zscalerone.net':  'https://config.zpaone.net',
+        };
+        zpaHost = zpaHostMap[cloudEnv] || 'https://config.private.zscaler.com';
+        console.log('[getClient oneapi] fallback ZPA host from cloudEnv:', zpaHost);
+      }
+
+      // Also compute OneAPI gateway for any non-ZPA-mgmtconfig calls
       const gwHost = ONEAPI_GATEWAY[cloudEnv] || 'https://api.zsapi.net';
-      console.log('[getClient oneapi] gateway:', gwHost, 'customerId:', customerId, 'token:', token.slice(0, 20) + '...');
+      console.log('[getClient oneapi] zpaHost:', zpaHost, 'gwHost:', gwHost, 'customerId:', customerId, 'token:', token.slice(0, 20) + '...');
+
+      const mgmtBase = zpaHost + '/mgmtconfig/v1/admin/customers/' + (customerId || '');
       return {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        // base = legacy validate/scan endpoint (still needed for appProtection scan routes)
-        base: gwHost + '/zpa/mgmtconfig/v1/admin/customers/' + (customerId || ''),
-        // mgmtBase = full mgmtconfig path for CRUD
-        mgmtBase: gwHost + '/zpa/mgmtconfig/v1/admin/customers/' + (customerId || ''),
+        base: mgmtBase,
+        mgmtBase,
+        zpaHost,
       };
     }
     default:
@@ -90,33 +122,42 @@ router.get('/validate', async (req, res) => {
     let headers, base, mgmtBase;
     // For OneAPI, we need to discover customerId first via /zpa/mgmtconfig/v1/admin/customers
     if (authMode === 'oneapi') {
-      const ONEAPI_GATEWAY = {
-        'zscaler.com': 'https://api.zsapi.net',
-        'zscalertwo.net': 'https://api.zsapi.net',
-        'zscalerthree.net': 'https://api.zsapi.net',
-        'zscloud.net': 'https://api.zsapi.net',
-        'zscalerbeta.net': 'https://api.zsapi.net',
-        'zscalerone.net': 'https://api.zsapi.net',
-        'zscalergov.net': 'https://api.zscalergov.net',
-        'zscalergov.us': 'https://api.zscalergov.us',
+      const ZPA_HOST_MAP = {
+        'zscaler.com':     'https://config.private.zscaler.com',
+        'zscalertwo.net':  'https://config.zpatwo.net',
+        'zscalerthree.net':'https://config.zpathree.net',
+        'zscloud.net':     'https://config.zscloud.net',
+        'zscalerbeta.net': 'https://config.zpabeta.net',
+        'zscalerone.net':  'https://config.zpaone.net',
       };
       const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
       if (!token) throw new Error('Failed to obtain OneAPI token');
       headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-      const gwHost = ONEAPI_GATEWAY[cloudEnv] || 'https://api.zsapi.net';
+
+      // Auto-detect ZPA host from token audience
+      let zpaHost = ZPA_HOST_MAP[cloudEnv] || 'https://config.private.zscaler.com';
+      try {
+        const parts = token.split('.');
+        const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString());
+        const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+        const zpaAud = audList.find(a => a && a.startsWith('ZPA.'));
+        if (zpaAud) { zpaHost = 'https://' + zpaAud.replace('ZPA.', 'config.'); }
+      } catch(e) {}
+      console.log('[validate oneapi] zpaHost:', zpaHost);
+
       // Discover customer(s) for this token
-      const custRes = await axios.get(gwHost + '/zpa/mgmtconfig/v1/admin/customers', { headers, timeout: 10000 })
+      const custRes = await axios.get(zpaHost + '/mgmtconfig/v1/admin/customers', { headers, timeout: 10000 })
         .catch(() => null);
       let customerId = null;
       if (custRes?.data) {
         const custList = custRes.data.list || custRes.data.customers || custRes.data || [];
         const first = Array.isArray(custList) ? custList[0] : custList;
         customerId = first?.id || first?.customerId || null;
-        console.log('[validate] discovered customerId:', customerId, 'from', gwHost + '/zpa/mgmtconfig/v1/admin/customers');
+        console.log('[validate] discovered customerId:', customerId, 'from', zpaHost + '/mgmtconfig/v1/admin/customers');
       }
       base = customerId
-        ? gwHost + '/zpa/mgmtconfig/v1/admin/customers/' + customerId
-        : gwHost + '/zpa/mgmtconfig/v1/admin/customers';
+        ? zpaHost + '/mgmtconfig/v1/admin/customers/' + customerId
+        : zpaHost + '/mgmtconfig/v1/admin/customers';
       mgmtBase = base;
       const [cgRes, asRes] = await Promise.allSettled([
         axios.get(base + '/appConnectorGroup', { headers, timeout: 10000 }),
@@ -292,11 +333,19 @@ router.get('/customer', async (req, res) => {
   const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
   try {
     if (authMode === 'oneapi') {
-      const ONEAPI_GATEWAY = { 'zscaler.com': 'https://api.zsapi.net', 'zscalertwo.net': 'https://api.zsapi.net', 'zscalerthree.net': 'https://api.zsapi.net', 'zscloud.net': 'https://api.zsapi.net', 'zscalerbeta.net': 'https://api.zsapi.net', 'zscalerone.net': 'https://api.zsapi.net', 'zscalergov.net': 'https://api.zscalergov.net', 'zscalergov.us': 'https://api.zscalergov.us' };
+      const ZPA_HOST_MAP = { 'zscaler.com': 'https://config.private.zscaler.com', 'zscalertwo.net': 'https://config.zpatwo.net', 'zscalerthree.net': 'https://config.zpathree.net', 'zscloud.net': 'https://config.zscloud.net', 'zscalerbeta.net': 'https://config.zpabeta.net', 'zscalerone.net': 'https://config.zpaone.net' };
       const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
       const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-      const gwHost = ONEAPI_GATEWAY[cloudEnv] || 'https://api.zsapi.net';
-      const r = await axios.get(gwHost + '/zpa/mgmtconfig/v1/admin/customers', { headers, timeout: 8000 });
+      // Auto-detect ZPA host from token audience
+      let zpaHost = ZPA_HOST_MAP[cloudEnv] || 'https://config.private.zscaler.com';
+      try {
+        const parts = token.split('.');
+        const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString());
+        const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+        const zpaAud = audList.find(a => a && a.startsWith('ZPA.'));
+        if (zpaAud) { zpaHost = 'https://' + zpaAud.replace('ZPA.', 'config.'); }
+      } catch(e) {}
+      const r = await axios.get(zpaHost + '/mgmtconfig/v1/admin/customers', { headers, timeout: 8000 });
       const custList = r.data.list || r.data.customers || r.data || [];
       const first = Array.isArray(custList) ? custList[0] : custList;
       return res.json({ id: first?.id || first?.customerId, raw: r.data });

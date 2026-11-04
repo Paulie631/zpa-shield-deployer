@@ -1,6 +1,6 @@
 {
   "name": "zpa-shield-deployer",
-  "version": "1.3.10",
+  "version": "1.3.11",
   "description": "ZPA Autonomous Application Shield deployment wizard",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
