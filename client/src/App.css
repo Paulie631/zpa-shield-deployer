@@ -396,6 +396,84 @@ body {
 /* === Divider === */
 .divider { border: none; border-top: 1px solid #E5E7EB; margin: 24px 0; }
 
+/* === ZPA Credentials helpers === */
+.label-required { color: #ef4444; }
+
+.input-with-prefix {
+  display: flex;
+  align-items: stretch;
+}
+.input-prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: #F1F5F9;
+  border: 1.5px solid #D1D9E6;
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  font-size: 13px;
+  color: #64748b;
+  white-space: nowrap;
+  font-family: monospace;
+}
+.input-with-prefix input {
+  border-radius: 0 8px 8px 0 !important;
+  flex: 1;
+}
+
+.input-with-reveal {
+  display: flex;
+  align-items: stretch;
+}
+.input-with-reveal input {
+  border-radius: 8px 0 0 8px !important;
+  flex: 1;
+}
+.reveal-btn {
+  padding: 0 12px;
+  border: 1.5px solid #D1D9E6;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background: #F8FAFC;
+  font-size: 12px;
+  cursor: pointer;
+  color: #64748b;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.reveal-btn:hover { background: #F1F5F9; }
+
+.find-guide {
+  background: #F8FAFC;
+  border: 1.5px solid #E2E8F0;
+  border-left: 4px solid #0066CC;
+  border-radius: 0 8px 8px 0;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+.find-guide-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 10px;
+}
+.find-guide-steps {
+  padding-left: 18px;
+  margin: 0 0 10px;
+}
+.find-guide-steps li {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.8;
+}
+.find-guide-link {
+  font-size: 12px;
+  color: #0066CC;
+  font-weight: 600;
+  text-decoration: none;
+}
+.find-guide-link:hover { text-decoration: underline; }
+
 /* === Update Checker === */
 .update-btn {
   display: inline-flex;
