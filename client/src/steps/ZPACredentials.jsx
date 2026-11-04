@@ -91,13 +91,17 @@ export default function ZPACredentials({ data, update, next }) {
       })
       next()
     } catch (err) {
-      const msg = err.response?.data?.error || err.message || ''
-      if (msg.includes('401') || msg.includes('403') || msg.includes('Unauthorized')) {
-        setError('Invalid credentials — double-check your credentials and tenant URL.')
-      } else if (msg.includes('ENOTFOUND') || msg.includes('network') || msg.includes('connect')) {
-        setError(`Can't reach the API endpoint — check your tenant URL, cloud environment, and internet connection.`)
+      const data = err.response?.data
+      const msg = data?.error || data?.message || err.message || ''
+      const httpStatus = data?.httpStatus ? ` HTTP ${data.httpStatus}` : ''
+      const reqUrl = data?.requestUrl ? ` [${data.requestUrl}]` : ''
+      const rawStr = data?.raw ? ' | ' + JSON.stringify(data.raw).slice(0, 200) : ''
+      if (msg.includes('401') || msg.includes('403') || msg.includes('Unauthorized') || msg.includes('invalid_client')) {
+        setError(`Invalid credentials — double-check your Client ID, Secret, and Vanity Domain.${httpStatus}${reqUrl}`)
+      } else if (msg.includes('ENOTFOUND') || msg.includes('network') || msg.includes('connect') || msg.includes('ECONNREFUSED')) {
+        setError(`Can't reach the API endpoint — check your Vanity Domain (it becomes {vanity}.zslogin.net).${reqUrl}`)
       } else {
-        setError(msg || 'Connection failed. Check your credentials and try again.')
+        setError(`${msg || 'Connection failed.'}${httpStatus}${reqUrl}${rawStr}`)
       }
     } finally {
       setLoading(false)

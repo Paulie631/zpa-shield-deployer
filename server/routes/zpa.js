@@ -100,8 +100,11 @@ router.get('/validate', async (req, res) => {
       appSegments: parseList(asRes)
     });
   } catch (err) {
-    const detail = err.response?.data?.message || err.response?.data?.error || err.message;
-    res.status(400).json({ valid: false, error: detail });
+    const status = err.response?.status;
+    const detail = err.response?.data?.message || err.response?.data?.error_description || err.response?.data?.error || err.message;
+    const url = err.config?.url || '';
+    console.error('[ZPA validate]', status, url, detail, err.response?.data);
+    res.status(400).json({ valid: false, error: detail, httpStatus: status, requestUrl: url, raw: err.response?.data });
   }
 });
 
