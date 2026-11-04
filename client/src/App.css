@@ -474,6 +474,30 @@ body {
 }
 .find-guide-link:hover { text-decoration: underline; }
 
+/* === Auth Mode Cards === */
+.auth-mode-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 4px;
+}
+.auth-mode-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 2px solid #E2E8F0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: white;
+}
+.auth-mode-card:hover { border-color: #0066CC; background: #F8FBFF; }
+.auth-mode-card.selected { border-color: #0066CC; background: #EBF3FF; }
+.auth-mode-icon { font-size: 22px; flex-shrink: 0; }
+.auth-mode-label { font-size: 13px; font-weight: 700; color: #0f172a; }
+.auth-mode-sub { font-size: 11px; color: #6b7280; margin-top: 1px; }
+
 /* === Update Checker === */
 .update-btn {
   display: inline-flex;

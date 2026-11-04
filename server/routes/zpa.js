@@ -2,62 +2,107 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 
-function getAuthHeader(query) {
-  if (query.apiKey) return { Authorization: `Bearer ${query.apiKey}` };
-  return {}; // OAuth token fetched separately
-}
+// ─── Auth helpers ────────────────────────────────────────────────────────────
 
-async function getToken(tenantUrl, clientId, clientSecret) {
+// Tenant-scoped OAuth (classic ZPA)
+async function getTenantToken(tenantUrl, clientId, clientSecret) {
   const res = await axios.post(`https://${tenantUrl}/oauth/token`, null, {
-    params: { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }
+    params: { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret },
+    timeout: 10000
   });
   return res.data.access_token;
 }
 
+// Zidentity OAuth for OneAPI
+async function getOneApiToken(clientId, clientSecret) {
+  const res = await axios.post('https://id.zscaler.com/oauth2/v1/token', null, {
+    params: { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret },
+    timeout: 10000
+  });
+  return res.data.access_token;
+}
+
+/**
+ * Returns { headers, base } ready to make ZPA API calls.
+ * authMode: 'apikey' | 'oauth' | 'oneapi'
+ */
+async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv }) {
+  switch (authMode) {
+    case 'apikey': {
+      return {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        base: `https://${tenantUrl}/api/v1`
+      };
+    }
+    case 'oauth': {
+      const token = await getTenantToken(tenantUrl, clientId, clientSecret);
+      return {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        base: `https://${tenantUrl}/api/v1`
+      };
+    }
+    case 'oneapi': {
+      const token = await getOneApiToken(clientId, clientSecret);
+      // OneAPI base varies by cloud env — default to zscaler.com
+      const envMap = {
+        'zscaler.com':   'https://api.zscaler.com/zpa/v1',
+        'zscalertwo.net':'https://api.zscalertwo.net/zpa/v1',
+        'zscalerthree.net':'https://api.zscalerthree.net/zpa/v1',
+        'zscloud.net':   'https://api.zscloud.net/zpa/v1',
+        'zscalerbeta.net':'https://api.zscalerbeta.net/zpa/v1',
+        'zscalerone.net':'https://api.zscalerone.net/zpa/v1',
+      };
+      const base = envMap[cloudEnv] || 'https://api.zscaler.com/zpa/v1';
+      return {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        base
+      };
+    }
+    default:
+      throw new Error(`Unknown authMode: ${authMode}`);
+  }
+}
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+
 // GET /api/zpa/validate
 router.get('/validate', async (req, res) => {
-  const { tenantUrl, apiKey, clientId, clientSecret } = req.query;
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv } = req.query;
   try {
-    let headers;
-    if (apiKey) {
-      headers = { Authorization: `Bearer ${apiKey}` };
-    } else {
-      const token = await getToken(tenantUrl, clientId, clientSecret);
-      headers = { Authorization: `Bearer ${token}` };
-    }
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv });
 
-    const base = `https://${tenantUrl}/api/v1`;
-
-    const [cgRes, asRes] = await Promise.all([
-      axios.get(`${base}/appConnectorGroup`, { headers }),
-      axios.get(`${base}/application`, { headers })
+    const [cgRes, asRes] = await Promise.allSettled([
+      axios.get(`${base}/appConnectorGroup`, { headers, timeout: 10000 }),
+      axios.get(`${base}/application`, { headers, timeout: 10000 })
     ]);
+
+    // OneAPI may use different pagination shape — handle both
+    const parseList = (r) => {
+      if (r.status !== 'fulfilled') return [];
+      const d = r.value.data;
+      return d.list || d.appConnectorGroups || d.applications || d || [];
+    };
 
     res.json({
       valid: true,
-      connectorGroups: cgRes.data.list || cgRes.data || [],
-      appSegments: asRes.data.list || asRes.data || []
+      authMode,
+      base,
+      connectorGroups: parseList(cgRes),
+      appSegments: parseList(asRes)
     });
   } catch (err) {
-    res.status(400).json({ valid: false, error: err.response?.data?.message || err.message });
+    const detail = err.response?.data?.message || err.response?.data?.error || err.message;
+    res.status(400).json({ valid: false, error: detail });
   }
 });
 
-// POST /api/zpa/scan — create scan profile + scan
+// POST /api/zpa/scan
 router.post('/scan', async (req, res) => {
-  const { tenantUrl, apiKey, clientId, clientSecret, appSegmentIds, probingLevel, frequency, startTime, scanName, scannerConnectorId } = req.body;
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv,
+    appSegmentIds, probingLevel, frequency, startTime, scanName, scannerConnectorId } = req.body;
   try {
-    let headers;
-    if (apiKey) {
-      headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
-    } else {
-      const token = await getToken(tenantUrl, clientId, clientSecret);
-      headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-    }
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv });
 
-    const base = `https://${tenantUrl}/api/v1`;
-
-    // Create scan profile
     const profileRes = await axios.post(`${base}/appProtection/scanProfile`, {
       name: `${scanName} Profile`,
       probingLevel: probingLevel.toUpperCase(),
@@ -67,7 +112,6 @@ router.post('/scan', async (req, res) => {
 
     const scanProfileId = profileRes.data.id;
 
-    // Create scan
     const scanRes = await axios.post(`${base}/appProtection/scan`, {
       name: scanName,
       status: 'ENABLED',
@@ -82,22 +126,12 @@ router.post('/scan', async (req, res) => {
   }
 });
 
-// POST /api/zpa/app-segments — create app segments for test apps
+// POST /api/zpa/app-segments
 router.post('/app-segments', async (req, res) => {
-  const { tenantUrl, apiKey, clientId, clientSecret, serverGroupId, apps } = req.body;
-  // apps: [{ name, domain, port }]
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, serverGroupId, apps } = req.body;
   try {
-    let headers;
-    if (apiKey) {
-      headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
-    } else {
-      const token = await getToken(tenantUrl, clientId, clientSecret);
-      headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-    }
-
-    const base = `https://${tenantUrl}/api/v1`;
+    const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv });
     const created = [];
-
     for (const app of apps) {
       const r = await axios.post(`${base}/application`, {
         name: app.name,
@@ -108,7 +142,6 @@ router.post('/app-segments', async (req, res) => {
       }, { headers });
       created.push({ name: app.name, id: r.data.id, domain: app.domain });
     }
-
     res.json({ created });
   } catch (err) {
     res.status(400).json({ error: err.response?.data?.message || err.message });
