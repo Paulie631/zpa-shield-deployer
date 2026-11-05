@@ -18,16 +18,33 @@ async function getTenantToken(tenantUrl, clientId, clientSecret) {
 // vanityDomain = company slug, e.g. "acme" → acme.zslogin.net
 async function getOneApiToken(clientId, clientSecret, vanityDomain) {
   if (!vanityDomain) throw new Error('vanityDomain is required for OneAPI auth (e.g. "acme" from acme.zslogin.net)');
+  if (!clientId || !clientSecret) throw new Error(`Zidentity client ID and secret are required${!clientSecret ? ' — the client secret is missing (paste it again)' : ''}`);
   const tokenUrl = `https://${vanityDomain}.zslogin.net/oauth2/v1/token`;
-  const res = await axios.post(tokenUrl,
-    new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-      audience: 'https://api.zscaler.com',
-    }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' }, timeout: 10000 }
-  );
+  let res;
+  try {
+    res = await axios.post(tokenUrl,
+      new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: clientId,
+        client_secret: clientSecret,
+        audience: 'https://api.zscaler.com',
+      }).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' }, timeout: 15000 }
+    );
+  } catch (err) {
+    // Say what Zidentity said, and whether it's our input or their side
+    const st = err.response?.status;
+    const d = err.response?.data || {};
+    const detail = d.error_description || d.error || d.message || (typeof d === 'string' ? d.slice(0, 200) : '');
+    let hint = '';
+    if (st === 401 || st === 400 || /invalid_client|unauthorized/i.test(detail)) hint = 'Zidentity rejected the client ID / secret. Check the API client in the Zidentity console (Integration → API Clients) and paste the secret again.';
+    else if (st >= 500) hint = `Zidentity's sign-in service (${vanityDomain}.zslogin.net) returned a server error. This is on Zscaler's side — wait a minute and try again; if it persists, check status.zscaler.com.`;
+    else if (!st) hint = `Couldn't reach ${vanityDomain}.zslogin.net — check the vanity domain and your network.`;
+    const e = new Error(`Token request to ${vanityDomain}.zslogin.net failed${st ? ` (HTTP ${st})` : ''}${detail ? `: ${detail}` : ''}. ${hint}`.trim());
+    e.response = err.response;
+    throw e;
+  }
+  if (!res.data || !res.data.access_token) throw new Error(`Zidentity returned no access token (${JSON.stringify(res.data).slice(0, 200)})`);
   return res.data.access_token;
 }
 
@@ -62,6 +79,7 @@ const ENROLLMENT_CERT_URL = (mgmtBase) => mgmtBase.replace('/mgmtconfig/v1/', '/
 
 // One place to turn an axios/ZPA error into a message for the UI
 function zpaError(err) {
+  if (/^Token request to /.test(err.message || '')) return err.message;   // already explained
   const d = err.response?.data;
   return (d && (d.message || d.reason || d.exception)) || err.message;
 }
