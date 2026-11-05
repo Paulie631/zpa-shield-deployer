@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { CloudFormationClient, CreateStackCommand, DescribeStacksCommand } = require('@aws-sdk/client-cloudformation');
+const { CloudFormationClient, CreateStackCommand, DescribeStacksCommand, DescribeStackEventsCommand, DeleteStackCommand } = require('@aws-sdk/client-cloudformation');
 const { EC2Client, DescribeVpcsCommand, DescribeSubnetsCommand, DescribeKeyPairsCommand, DescribeImagesCommand } = require('@aws-sdk/client-ec2');
 const { SSMClient, PutParameterCommand } = require('@aws-sdk/client-ssm');
 const { generateCfnTemplate } = require('../templates/cfnTemplate');
@@ -33,14 +33,42 @@ async function rhel9Ami(ec2, region) {
 // e.g. from the AWS access portal / IAM Identity Center
 // Create a stack; if one with this name already exists (e.g. deployed before a page
 // refresh), use it rather than failing — the wizard then just tracks its status.
+// A stack that failed to create can't be updated or reused — it must be deleted first.
+const DEAD_STATES = ['ROLLBACK_COMPLETE', 'ROLLBACK_FAILED', 'CREATE_FAILED', 'DELETE_FAILED'];
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function createStackOrReuse(cfn, params) {
   try {
     await cfn.send(new CreateStackCommand(params));
     return false;
   } catch (e) {
-    if (e.name === 'AlreadyExistsException' || /already exists/i.test(e.message || '')) return true;
-    throw e;
+    if (!(e.name === 'AlreadyExistsException' || /already exists/i.test(e.message || ''))) throw e;
+    const cur = (await cfn.send(new DescribeStacksCommand({ StackName: params.StackName }))).Stacks[0];
+    if (!DEAD_STATES.includes(cur.StackStatus)) return true;           // healthy or in progress: track it
+    console.log(`[aws] ${params.StackName} is ${cur.StackStatus} — deleting it before relaunching`);
+    await cfn.send(new DeleteStackCommand({ StackName: params.StackName }));
+    for (let i = 0; i < 60; i++) {                                     // up to ~5 minutes
+      await sleep(5000);
+      try {
+        const s = (await cfn.send(new DescribeStacksCommand({ StackName: params.StackName }))).Stacks[0];
+        if (s.StackStatus === 'DELETE_FAILED') throw new Error(`Couldn't delete the failed stack ${params.StackName}: ${s.StackStatusReason || 'see the AWS console'}`);
+      } catch (err) {
+        if (/does not exist/i.test(err.message || '')) { await cfn.send(new CreateStackCommand(params)); return false; }
+        throw err;
+      }
+    }
+    throw new Error(`Timed out waiting for the failed stack ${params.StackName} to be deleted`);
   }
+}
+
+// The first real failure reasons from a stack's events (skipping the knock-on "cancelled" ones)
+async function stackFailures(cfn, stackName) {
+  const r = await cfn.send(new DescribeStackEventsCommand({ StackName: stackName }));
+  return (r.StackEvents || [])
+    .filter(e => /FAILED$/.test(e.ResourceStatus || '') && e.ResourceStatusReason
+      && !/cancelled|canceled/i.test(e.ResourceStatusReason) && e.ResourceType !== 'AWS::CloudFormation::Stack')
+    .reverse()
+    .slice(0, 5)
+    .map(e => ({ resource: e.LogicalResourceId, type: e.ResourceType, reason: e.ResourceStatusReason }));
 }
 
 function awsClients(accessKeyId, secretAccessKey, region, sessionToken) {
@@ -116,10 +144,12 @@ router.get('/stack-status', async (req, res) => {
     const { cfn } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
     const r = await cfn.send(new DescribeStacksCommand({ StackName: stackName }));
     const stack = r.Stacks[0];
+    const failed = /FAILED|ROLLBACK/.test(stack.StackStatus);
     res.json({
       status: stack.StackStatus,
       outputs: stack.Outputs || [],
-      reason: stack.StackStatusReason || ''
+      reason: stack.StackStatusReason || '',
+      failures: failed ? await stackFailures(cfn, stackName).catch(() => []) : [],
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

@@ -13,6 +13,8 @@ export default function DeployTestApps({ data, update, next, back }) {
   const [error, setError] = useState('')
   const [launched, setLaunched] = useState(data.testAppsLaunched || false)
   const [skipped, setSkipped] = useState(false)
+  const [failures, setFailures] = useState([])
+  const stackDead = /ROLLBACK_COMPLETE|_FAILED$/.test(stackStatus)
   const pollRef = useRef(null)
   const isAWS = data.target === 'aws'
 
@@ -75,6 +77,7 @@ export default function DeployTestApps({ data, update, next, back }) {
   const deploy = async () => {
     setDeploying(true)
     setError('')
+    setFailures([])
     try {
       await axios.post('/api/aws/deploy-test-apps', {
         accessKeyId: data.accessKeyId,
@@ -102,13 +105,14 @@ export default function DeployTestApps({ data, update, next, back }) {
         params: { stackName: 'zpa-test-apps', region: data.region, accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey, sessionToken: data.sessionToken }
       })
       setStackStatus(r.data.status)
+      setFailures(r.data.failures || [])
       if (r.data.status === 'CREATE_COMPLETE') {
         clearInterval(pollRef.current)
         setDeploying(false)
         const ip = r.data.outputs?.find(o => o.OutputKey === 'PrivateIp')?.OutputValue
         setPrivateIp(ip || '')
         update({ testAppsLaunched: true, testAppsPrivateIp: ip, testApps: APPS })
-      } else if (r.data.status.includes('FAILED') || r.data.status.includes('ROLLBACK')) {
+      } else if (/_COMPLETE$|_FAILED$/.test(r.data.status)) {   // final failure state (keep polling through *_IN_PROGRESS)
         clearInterval(pollRef.current)
         setDeploying(false)
       }
@@ -124,7 +128,7 @@ export default function DeployTestApps({ data, update, next, back }) {
     pollStatus().then(found => {
       if (!found) return
       setLaunched(true)
-      if (!['CREATE_COMPLETE'].includes(found) && !/FAILED|ROLLBACK/.test(found)) {
+      if (!/_COMPLETE$|_FAILED$/.test(found)) {
         setDeploying(true)
         pollRef.current = setInterval(pollStatus, 5000)
       }
@@ -212,6 +216,12 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
       {launched && stackStatus && (
         <div className="stack-status" style={{ marginTop: 16 }}>
           <h4>Test Apps Stack</h4>
+          {failures.length > 0 && (
+            <div className="alert alert-error" style={{ display: 'block', margin: '8px 0' }}>
+              <strong>Why AWS rolled it back:</strong>
+              {failures.map((f, i) => <div key={i} style={{ marginTop: 4, fontSize: 13 }}>• <code>{f.resource}</code> ({f.type}): {f.reason}</div>)}
+            </div>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
             {deploying && <span className="spinner spinner-blue" />}
             <span className={`status-label ${statusClass}`}>
@@ -244,11 +254,14 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
             {runState === 'starting' || runState === 'running' ? 'Waiting for test apps...' : runState === 'done' || isAWS ? 'Continue →' : 'Skip / Continue →'}
           </button>
         )}
-        {isAWS && launched && stackStatus !== 'CREATE_COMPLETE' && !stackStatus.includes('FAILED') && (
-          <button className="btn btn-primary" disabled>Waiting for stack...</button>
+        {isAWS && launched && stackStatus !== 'CREATE_COMPLETE' && !stackDead && (
+          <button className="btn btn-primary" disabled>{/ROLLBACK/.test(stackStatus) ? 'Rolling back...' : 'Waiting for stack...'}</button>
         )}
-        {isAWS && launched && stackStatus.includes('FAILED') && (
-          <button className="btn btn-secondary" onClick={next}>Skip & Continue →</button>
+        {isAWS && launched && stackDead && !deploying && (
+          <>
+            <button className="btn btn-secondary" onClick={next}>Skip & Continue →</button>
+            <button className="btn btn-primary" onClick={deploy}>↻ Delete failed stack &amp; try again</button>
+          </>
         )}
       </div>
     </div>

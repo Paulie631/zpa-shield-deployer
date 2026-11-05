@@ -3,7 +3,7 @@ function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSi
 
   return JSON.stringify({
     AWSTemplateFormatVersion: '2010-09-09',
-    Description: 'ZPA Autonomous Application Shield — App Scanner (RPM on RHEL 9). NOTE: Update ImageId per region. Find RHEL 9 AMIs at https://access.redhat.com/solutions/15356',
+    Description: 'ZPA Autonomous Application Shield - App Scanner (RPM on RHEL 9)',
     Resources: {
       ZPAScannerRole: {
         Type: 'AWS::IAM::Role',
@@ -32,7 +32,8 @@ function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSi
       ZPAScannerSecurityGroup: {
         Type: 'AWS::EC2::SecurityGroup',
         Properties: {
-          GroupDescription: 'ZPA App Scanner — outbound 443 only (no inbound required)',
+          // EC2 security group descriptions must be plain ASCII (no em dashes etc.)
+          GroupDescription: 'ZPA App Scanner - outbound 443 only (no inbound required)',
           VpcId: vpcId,
           SecurityGroupEgress: [
             { IpProtocol: 'tcp', FromPort: 443, ToPort: 443, CidrIp: '0.0.0.0/0', Description: 'Zscaler PSE + repo access' }

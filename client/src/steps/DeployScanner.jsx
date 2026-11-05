@@ -10,6 +10,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
   const [stackOutputs, setStackOutputs] = useState([])
   const [error, setError] = useState('')
   const [launched, setLaunched] = useState(false)
+  const [failures, setFailures] = useState([])
   const pollRef = useRef(null)
 
   // CloudShare: run the script on the VM through the CloudShare API
@@ -82,6 +83,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
   const launchStack = async () => {
     setDeploying(true)
     setError('')
+    setFailures([])
     try {
       await axios.post('/api/aws/deploy', {
         accessKeyId: data.accessKeyId,
@@ -119,7 +121,9 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
       })
       setStackStatus(r.data.status)
       setStackOutputs(r.data.outputs || [])
-      if (r.data.status === 'CREATE_COMPLETE' || r.data.status.includes('FAILED') || r.data.status.includes('ROLLBACK')) {
+      setFailures(r.data.failures || [])
+      // Keep polling through ROLLBACK_IN_PROGRESS etc.; stop on a final state
+      if (/_COMPLETE$|_FAILED$/.test(r.data.status)) {
         clearInterval(pollRef.current)
         setDeploying(false)
         if (r.data.status === 'CREATE_COMPLETE') {
@@ -139,7 +143,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
     pollStatus().then(found => {
       if (!found) return
       setLaunched(true)
-      if (!['CREATE_COMPLETE'].includes(found) && !/FAILED|ROLLBACK/.test(found)) {
+      if (!/_COMPLETE$|_FAILED$/.test(found)) {
         setDeploying(true)
         pollRef.current = setInterval(pollStatus, 5000)
       }
@@ -221,6 +225,12 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
               {stackStatus}
             </span>
           </div>
+          {failures.length > 0 && (
+            <div className="alert alert-error" style={{ display: 'block', marginBottom: 12 }}>
+              <strong>Why AWS rolled it back:</strong>
+              {failures.map((f, i) => <div key={i} style={{ marginTop: 4, fontSize: 13 }}>• <code>{f.resource}</code> ({f.type}): {f.reason}</div>)}
+            </div>
+          )}
           {stackOutputs.map(o => (
             <div key={o.OutputKey} style={{ fontSize: 13, marginBottom: 4 }}>
               <strong>{o.OutputKey}:</strong> {o.OutputValue}
@@ -242,10 +252,12 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
           <button className="btn btn-primary" onClick={launchStack} disabled={deploying}>
             {deploying ? <><span className="spinner" /> Launching...</> : '🚀 Launch Stack'}
           </button>
+        ) : /ROLLBACK_COMPLETE|_FAILED$/.test(stackStatus) && !deploying ? (
+          <button className="btn btn-primary" onClick={launchStack}>↻ Delete failed stack &amp; try again</button>
         ) : (
           <button className="btn btn-primary" onClick={next}
             disabled={stackStatus !== 'CREATE_COMPLETE'}>
-            {stackStatus === 'CREATE_COMPLETE' ? 'Continue →' : 'Waiting for stack...'}
+            {stackStatus === 'CREATE_COMPLETE' ? 'Continue →' : /ROLLBACK/.test(stackStatus) ? 'Rolling back...' : 'Waiting for stack...'}
           </button>
         )}
       </div>
