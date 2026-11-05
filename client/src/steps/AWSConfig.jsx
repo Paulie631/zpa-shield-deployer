@@ -10,6 +10,7 @@ const REGIONS = [
 
 export default function AWSConfig({ data, update, next, back }) {
   const [form, setForm] = useState({
+    awsProfile: data.awsProfile || '',
     accessKeyId: data.accessKeyId || '',
     secretAccessKey: data.secretAccessKey || '',
     sessionToken: data.sessionToken || '',
@@ -28,14 +29,39 @@ export default function AWSConfig({ data, update, next, back }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
+  // Credential source: a profile from the AWS CLI on this machine (SSO sessions refresh
+  // themselves; expired ones need `aws sso login`) or keys pasted in
+  const [credMode, setCredMode] = useState(data.awsProfile ? 'profile' : (data.accessKeyId ? 'keys' : 'profile'))
+  const [profiles, setProfiles] = useState(null)
+  const [whoami, setWhoami] = useState(null)      // { state, account, arn, expiration, error }
+  useEffect(() => {
+    axios.get('/api/aws/profiles').then(r => {
+      const list = r.data.profiles || []
+      setProfiles(list)
+      if (!form.awsProfile && list.length) set('awsProfile', list.find(p => p !== 'default') || list[0])
+      if (!list.length && !data.awsProfile && !data.accessKeyId) setCredMode('keys')
+    }).catch(() => setProfiles([]))
+  }, [])
+  const authParams = () => credMode === 'profile'
+    ? { awsProfile: form.awsProfile, region: form.region }
+    : { accessKeyId: form.accessKeyId, secretAccessKey: form.secretAccessKey, sessionToken: form.sessionToken, region: form.region }
+  const haveCreds = credMode === 'profile' ? !!form.awsProfile : (form.accessKeyId && form.secretAccessKey && (!/^ASIA/.test(form.accessKeyId.trim()) || form.sessionToken))
+
+  const checkWhoami = async () => {
+    setWhoami({ state: 'running' })
+    try {
+      const r = await axios.get('/api/aws/whoami', { params: authParams() })
+      setWhoami({ state: 'ok', ...r.data })
+    } catch (e) { setWhoami({ state: 'error', error: e.response?.data?.error || e.message }) }
+  }
+  useEffect(() => { if (credMode === 'profile' && form.awsProfile) checkWhoami() }, [credMode, form.awsProfile])
+
   const fetchResources = async () => {
-    if (!form.accessKeyId || !form.secretAccessKey || !form.region) return
+    if (!haveCreds || !form.region) return
     setLoadingResources(true)
     setResourceError('')
     try {
-      const res = await axios.get('/api/aws/resources', {
-        params: { accessKeyId: form.accessKeyId, secretAccessKey: form.secretAccessKey, sessionToken: form.sessionToken, region: form.region }
-      })
+      const res = await axios.get('/api/aws/resources', { params: authParams() })
       setResources(res.data)
     } catch (err) {
       setResourceError(err.response?.data?.error || 'Could not fetch AWS resources. Check your credentials and region.')
@@ -47,15 +73,57 @@ export default function AWSConfig({ data, update, next, back }) {
   const filteredSubnets = resources.subnets.filter(s => !form.vpcId || s.vpcId === form.vpcId)
 
   const isTempKey = /^ASIA/.test((form.accessKeyId || '').trim())
-  const canContinue = form.accessKeyId && form.secretAccessKey && (!isTempKey || form.sessionToken) && form.region && form.vpcId && form.subnetId && form.keyPairName
+  const canContinue = haveCreds && form.region && form.vpcId && form.subnetId && form.keyPairName
+  // What the later steps get: only the chosen credential source
+  const toSave = () => credMode === 'profile'
+    ? { ...form, accessKeyId: '', secretAccessKey: '', sessionToken: '' }
+    : { ...form, awsProfile: '' }
 
   return (
     <div className="card">
       <h2>AWS Configuration</h2>
       <p className="subtitle">Enter your AWS credentials and select the target VPC, subnet, and key pair for the App Scanner instance.</p>
 
-      <div className="disclaimer">🔒 AWS credentials go only to AWS. The wizard keeps them in this browser tab so your progress survives a page refresh, and forgets them when you close the tab.</div>
+      <div className="disclaimer">🔒 AWS credentials go only to AWS. Pasted keys are kept in this browser tab until you close it; a CLI profile’s credentials never leave your machine.</div>
 
+      <div style={{ display: 'flex', gap: 16, fontSize: 13, margin: '12px 0' }}>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="radio" style={{ width: 'auto' }} checked={credMode === 'profile'} onChange={() => setCredMode('profile')} /> Use my AWS CLI profile (recommended)</label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="radio" style={{ width: 'auto' }} checked={credMode === 'keys'} onChange={() => setCredMode('keys')} /> Paste access keys</label>
+      </div>
+
+      {credMode === 'profile' && (
+        <div className="form-group">
+          <label>AWS CLI profile</label>
+          {profiles === null ? <div className="hint">Looking for profiles in ~/.aws...</div> : profiles.length === 0 ? (
+            <div className="alert alert-warning" style={{ display: 'block' }}>
+              No AWS CLI profiles found on this Mac. Set one up once, then come back:
+              <pre style={{ marginTop: 6, background: '#1e293b', color: '#e2e8f0', padding: 8, borderRadius: 6, fontSize: 12 }}>{`brew install awscli      # if you don't have it
+aws configure sso        # SSO start URL = your AWS access portal; name the profile e.g. "zscaler"
+aws sso login --profile zscaler`}</pre>
+              <button onClick={() => axios.get('/api/aws/profiles').then(r => setProfiles(r.data.profiles || []))} style={{ fontSize: 12, marginTop: 6 }}>↻ Look again</button>
+            </div>
+          ) : (
+            <select value={form.awsProfile} onChange={e => set('awsProfile', e.target.value)}>
+              {profiles.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          )}
+          {whoami?.state === 'running' && <div className="hint"><span className="spinner spinner-blue" /> Checking the profile...</div>}
+          {whoami?.state === 'ok' && (
+            <div className="hint" style={{ color: '#16a34a' }}>
+              ✅ Signed in as <code>{whoami.arn}</code> (account {whoami.account}){whoami.expiration ? ` — session valid until ${new Date(whoami.expiration).toLocaleTimeString()}` : ''}
+            </div>
+          )}
+          {whoami?.state === 'error' && (
+            <div className="alert alert-error" style={{ display: 'block', marginTop: 6 }}>
+              ⚠️ {whoami.error}
+              <div style={{ marginTop: 4 }}><button onClick={checkWhoami} style={{ fontSize: 12 }}>↻ Check again</button></div>
+            </div>
+          )}
+          <div className="hint">SSO sessions refresh on their own while they last; when one expires, run <code>aws sso login --profile {form.awsProfile || 'NAME'}</code> in Terminal and click Check again.</div>
+        </div>
+      )}
+
+      {credMode === 'keys' && (<>
       <div className="form-row">
         <div className="form-group">
           <label>AWS Access Key ID</label>
@@ -82,6 +150,7 @@ export default function AWSConfig({ data, update, next, back }) {
           <div className="hint">Temporary keys expire (usually after 1–12 hours). If AWS starts rejecting them, copy fresh ones from the portal.</div>
         )}
       </div>
+      </>)}
 
       <div className="form-row">
         <div className="form-group">
@@ -91,7 +160,7 @@ export default function AWSConfig({ data, update, next, back }) {
           </select>
         </div>
         <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
-          <button className="btn btn-secondary" style={{ width: '100%' }} onClick={fetchResources} disabled={loadingResources || !form.accessKeyId || !form.secretAccessKey || (isTempKey && !form.sessionToken)}>
+          <button className="btn btn-secondary" style={{ width: '100%' }} onClick={fetchResources} disabled={loadingResources || !haveCreds}>
             {loadingResources ? <><span className="spinner spinner-blue" /> Loading...</> : '🔍 Load VPCs & Subnets'}
           </button>
         </div>
@@ -163,7 +232,7 @@ export default function AWSConfig({ data, update, next, back }) {
 
       <div className="btn-row">
         <button className="btn btn-secondary" onClick={back}>← Back</button>
-        <button className="btn btn-primary" onClick={() => { update(form); next() }} disabled={!canContinue}>
+        <button className="btn btn-primary" onClick={() => { update(toSave()); next() }} disabled={!canContinue}>
           Continue →
         </button>
       </div>

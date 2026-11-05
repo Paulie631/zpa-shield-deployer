@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import { zpaAuth, zpaPortalBase, savedCustomerId, rememberCustomerId } from '../lib/zpa'
+import { awsAuth } from '../lib/aws'
 
 // Publish the test apps through ZPA:
 //   1. a traffic-forwarding App Connector in the VPC (AWS), in its own connector group
@@ -16,7 +17,7 @@ export default function PublishApps({ data, update, next, back }) {
   const [cid, setCid] = useState(data.customerId || savedCustomerId(data))
   const needsCid = data.authMode === 'oneapi' && !/^\d+$/.test(cid || '')
   const setCustomerId = (v) => { setCid(v); if (/^\d+$/.test(v)) { update({ customerId: v }); rememberCustomerId(data, v) } }
-  const aws = { accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey, sessionToken: data.sessionToken, region: data.region }
+  const aws = awsAuth(data)
 
   // per-part state: { state: 'idle'|'running'|'done'|'error', lines: [], error }
   const [conn, setConn] = useState(data.publishConn || { state: 'idle', lines: [] })
@@ -44,7 +45,7 @@ export default function PublishApps({ data, update, next, back }) {
   }
   // Pick up a connector stack launched earlier (e.g. before a page refresh)
   useEffect(() => {
-    if (!isAWS || !data.accessKeyId) return
+    if (!isAWS || !(data.accessKeyId || data.awsProfile)) return
     pollStack().then(s => { if (s && !/_COMPLETE$|_FAILED$/.test(s)) pollRef.current = setInterval(pollStack, 8000) })
   }, [])
 

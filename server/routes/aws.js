@@ -3,6 +3,11 @@ const router = express.Router();
 const { CloudFormationClient, CreateStackCommand, DescribeStacksCommand, DescribeStackEventsCommand, DeleteStackCommand, DescribeStackResourceCommand } = require('@aws-sdk/client-cloudformation');
 const { EC2Client, DescribeVpcsCommand, DescribeSubnetsCommand, DescribeKeyPairsCommand, DescribeImagesCommand, AuthorizeSecurityGroupIngressCommand, AuthorizeSecurityGroupEgressCommand } = require('@aws-sdk/client-ec2');
 const { SSMClient, PutParameterCommand } = require('@aws-sdk/client-ssm');
+const { fromNodeProviderChain } = require('@aws-sdk/credential-providers');
+const { STSClient, GetCallerIdentityCommand } = require('@aws-sdk/client-sts');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { generateCfnTemplate } = require('../templates/cfnTemplate');
 const { generateSetupScript } = require('../templates/setupScript');
 const { generateTestAppsScript } = require('../templates/testAppsScript');
@@ -90,10 +95,47 @@ function scannerEgressToVpc(cidr) {
   return { IpProtocol: '-1', CidrIp: cidr, Description: 'Scan apps inside the VPC' };
 }
 
-function awsClients(accessKeyId, secretAccessKey, region, sessionToken) {
+// Profiles in ~/.aws/config and ~/.aws/credentials (the backend runs on the user's own machine)
+function listAwsProfiles() {
+  const names = new Set();
+  const read = (file, strip) => {
+    try {
+      for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+        const m = line.match(/^\s*\[\s*(.+?)\s*\]\s*$/);
+        if (!m) continue;
+        const n = strip ? m[1].replace(/^profile\s+/, '') : m[1];
+        if (!/^sso-session\s/.test(n) && !/^services\s/.test(n)) names.add(n);
+      }
+    } catch (e) { /* file missing is fine */ }
+  };
+  read(path.join(os.homedir(), '.aws', 'config'), true);
+  read(path.join(os.homedir(), '.aws', 'credentials'), false);
+  return [...names];
+}
+
+// Credentials for the SDK clients: a local CLI profile (SSO, assumed role, keys — whatever it
+// is configured with, refreshed by the SDK) or keys pasted into the wizard.
+function credentialsFor({ profile, accessKeyId, secretAccessKey, sessionToken }) {
+  if (profile) return fromNodeProviderChain({ profile });
   const credentials = { accessKeyId: (accessKeyId || '').trim(), secretAccessKey: (secretAccessKey || '').trim() };
   if (sessionToken && sessionToken.trim()) credentials.sessionToken = sessionToken.trim();
-  const creds = { credentials, region };
+  return credentials;
+}
+
+// Turn SDK credential errors into something the person can act on
+function credentialError(err, profile) {
+  const msg = err.message || String(err);
+  if (profile && /sso|token|expired|refresh|login/i.test(msg)) {
+    return `The AWS CLI session for profile "${profile}" has expired or isn't signed in. Run: aws sso login --profile ${profile}`;
+  }
+  if (profile && /Could not load credentials|Could not resolve|could not be found|not found/i.test(msg)) {
+    return `AWS profile "${profile}" has no usable credentials — pick another profile, or set this one up with "aws configure sso" (${msg})`;
+  }
+  return msg;
+}
+
+function awsClients(accessKeyId, secretAccessKey, region, sessionToken, profile) {
+  const creds = { credentials: credentialsFor({ profile, accessKeyId, secretAccessKey, sessionToken }), region };
   return {
     cfn: new CloudFormationClient(creds),
     ec2: new EC2Client(creds),
@@ -103,9 +145,9 @@ function awsClients(accessKeyId, secretAccessKey, region, sessionToken) {
 
 // GET /api/aws/resources
 router.get('/resources', async (req, res) => {
-  const { accessKeyId, secretAccessKey, sessionToken, region } = req.query;
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region } = req.query;
   try {
-    const { ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
+    const { ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
     const [vpcs, subnets, keyPairs] = await Promise.all([
       ec2.send(new DescribeVpcsCommand({})),
       ec2.send(new DescribeSubnetsCommand({})),
@@ -117,16 +159,35 @@ router.get('/resources', async (req, res) => {
       keyPairs: keyPairs.KeyPairs.map(k => ({ name: k.KeyName }))
     });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: credentialError(err, awsProfile) });
+  }
+});
+
+// GET /api/aws/profiles — AWS CLI profiles on this machine
+router.get('/profiles', (req, res) => {
+  res.json({ profiles: listAwsProfiles(), home: os.homedir() });
+});
+
+// GET /api/aws/whoami — can these credentials be used, and who are they? (also warms SSO)
+router.get('/whoami', async (req, res) => {
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region } = req.query;
+  try {
+    const sts = new STSClient({ credentials: credentialsFor({ profile: awsProfile, accessKeyId, secretAccessKey, sessionToken }), region: region || 'us-east-1' });
+    const id = await sts.send(new GetCallerIdentityCommand({}));
+    let expiration = null;
+    if (awsProfile) { try { expiration = (await fromNodeProviderChain({ profile: awsProfile })()).expiration || null; } catch (e) { /* ignore */ } }
+    res.json({ account: id.Account, arn: id.Arn, expiration });
+  } catch (err) {
+    res.status(400).json({ error: credentialError(err, awsProfile) });
   }
 });
 
 // POST /api/aws/deploy — App Scanner
 router.post('/deploy', async (req, res) => {
-  const { accessKeyId, secretAccessKey, sessionToken, region, vpcId, subnetId, keyPairName,
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region, vpcId, subnetId, keyPairName,
     instanceType, ebsSize, ssmParamName, provisioningKey, stackName } = req.body;
   try {
-    const { cfn, ssm, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
+    const { cfn, ssm, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
     const imageId = await rhel9Ami(ec2, region);
 
     // Store provisioning key in SSM
@@ -159,9 +220,9 @@ router.post('/deploy', async (req, res) => {
 
 // GET /api/aws/stack-status
 router.get('/stack-status', async (req, res) => {
-  const { stackName, region, accessKeyId, secretAccessKey, sessionToken } = req.query;
+  const { stackName, region, accessKeyId, secretAccessKey, sessionToken, awsProfile } = req.query;
   try {
-    const { cfn } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
+    const { cfn } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
     const r = await cfn.send(new DescribeStacksCommand({ StackName: stackName }));
     const stack = r.Stacks[0];
     const failed = /FAILED|ROLLBACK/.test(stack.StackStatus);
@@ -178,9 +239,9 @@ router.get('/stack-status', async (req, res) => {
 
 // POST /api/aws/deploy-test-apps — DVWA + Juice Shop
 router.post('/deploy-test-apps', async (req, res) => {
-  const { accessKeyId, secretAccessKey, sessionToken, region, vpcId, subnetId, keyPairName, instanceType, stackName } = req.body;
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region, vpcId, subnetId, keyPairName, instanceType, stackName } = req.body;
   try {
-    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
+    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
     const imageId = await rhel9Ami(ec2, region);
 
     // Same script as CloudShare: Docker CE (RHEL 9's own "docker" package is podman,
@@ -244,10 +305,10 @@ router.post('/deploy-test-apps', async (req, res) => {
 // POST /api/aws/deploy-traffic-connector — an ordinary App Connector in the VPC that
 // forwards user traffic to the test apps (outbound 443 to Zscaler, plus the VPC)
 router.post('/deploy-traffic-connector', async (req, res) => {
-  const { accessKeyId, secretAccessKey, sessionToken, region, vpcId, subnetId, keyPairName, provisioningKey, stackName } = req.body;
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region, vpcId, subnetId, keyPairName, provisioningKey, stackName } = req.body;
   try {
     if (!provisioningKey) throw new Error('No provisioning key for the traffic connector');
-    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
+    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
     const imageId = await rhel9Ami(ec2, region);
     const cidr = await vpcCidr(ec2, vpcId);
     const template = JSON.stringify({
@@ -294,10 +355,10 @@ router.post('/deploy-traffic-connector', async (req, res) => {
 // POST /api/aws/open-scan-paths — add the VPC-internal rules to stacks deployed before
 // the templates had them. Safe to run repeatedly (existing rules are left alone).
 router.post('/open-scan-paths', async (req, res) => {
-  const { accessKeyId, secretAccessKey, sessionToken, region, vpcId, testAppsStack = 'zpa-test-apps', scannerStack = 'zpa-app-scanner' } = req.body;
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region, vpcId, testAppsStack = 'zpa-test-apps', scannerStack = 'zpa-app-scanner' } = req.body;
   const done = [];
   try {
-    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
+    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
     const cidr = await vpcCidr(ec2, vpcId);
     const sgOf = async (stack, logicalId) => {
       try {

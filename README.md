@@ -16,7 +16,7 @@ A 9-step guided wizard that automates the full ZPA App Shield deployment:
 |------|-------------|
 | 1 | Connect to your ZPA tenant (OneAPI/Zidentity, API key or OAuth) |
 | 2 | Choose AWS or CloudShare |
-| 3 | Configure your AWS environment (VPC, subnet, key pair; session token for temporary keys) or pick your CloudShare VMs |
+| 3 | Configure your AWS environment — pick an AWS CLI profile (SSO sessions refresh themselves) or paste keys — plus VPC, subnet and key pair; or pick your CloudShare VMs |
 | 4 | Deploy DVWA + OWASP Juice Shop as vulnerable test apps |
 | 5 | **Publish them through ZPA:** a traffic App Connector (deployed on AWS), app segments for both apps, and an access policy rule |
 | 6 | **Verify access:** ZPA-side checks (connector online, segments, rule), then a CloudShare VM with Zscaler Client Connector opens both apps, plus a manual check |

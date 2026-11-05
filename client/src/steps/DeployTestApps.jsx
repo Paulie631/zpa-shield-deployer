@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
+import { awsAuth } from '../lib/aws'
 
 const APPS = [
   { name: 'DVWA', icon: '🎯', port: 80, domain: 'dvwa.internal', desc: 'Damn Vulnerable Web App — SQLi, XSS, CSRF, File Inclusion, Command Injection, Path Traversal', color: '#FEE2E2' },
@@ -80,10 +81,7 @@ export default function DeployTestApps({ data, update, next, back }) {
     setFailures([])
     try {
       await axios.post('/api/aws/deploy-test-apps', {
-        accessKeyId: data.accessKeyId,
-        secretAccessKey: data.secretAccessKey,
-        sessionToken: data.sessionToken,
-        region: data.region,
+        ...awsAuth(data),
         vpcId: data.vpcId,
         subnetId: data.subnetId,
         keyPairName: data.keyPairName,
@@ -102,7 +100,7 @@ export default function DeployTestApps({ data, update, next, back }) {
   const pollStatus = async () => {
     try {
       const r = await axios.get('/api/aws/stack-status', {
-        params: { stackName: 'zpa-test-apps', region: data.region, accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey, sessionToken: data.sessionToken }
+        params: { ...awsAuth(data), stackName: 'zpa-test-apps' }
       })
       setStackStatus(r.data.status)
       setFailures(r.data.failures || [])
@@ -124,7 +122,7 @@ export default function DeployTestApps({ data, update, next, back }) {
 
   // If this stack was already launched (e.g. before the page was refreshed), pick it up
   useEffect(() => {
-    if (data.target !== 'aws' || !data.accessKeyId) return
+    if (data.target !== 'aws' || !(data.accessKeyId || data.awsProfile)) return
     pollStatus().then(found => {
       if (!found) return
       setLaunched(true)

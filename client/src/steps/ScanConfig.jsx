@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { zpaAuth, zpaPortalBase } from '../lib/zpa'
+import { awsAuth } from '../lib/aws'
 
 const PROBING = [
   {
@@ -53,8 +54,7 @@ export default function ScanConfig({ data, update, next, back }) {
   useEffect(() => {
     if (data.target !== 'aws' || !data.vpcId) return
     axios.post('/api/aws/open-scan-paths', {
-      accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey, sessionToken: data.sessionToken,
-      region: data.region, vpcId: data.vpcId, scannerStack: data.scannerStackName || 'zpa-app-scanner',
+      ...awsAuth(data), vpcId: data.vpcId, scannerStack: data.scannerStackName || 'zpa-app-scanner',
     }).then(r => setNetNote('✅ Network paths for scanning are open: ' + (r.data.done || []).join('; ')))
       .catch(e => setNetNote('⚠️ Couldn’t check the AWS network rules: ' + (e.response?.data?.error || e.message)))
   }, [])

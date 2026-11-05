@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import CodePreview from '../components/CodePreview'
+import { awsAuth } from '../lib/aws'
 
 export default function DeployScanner({ data, update, next, back, isCloudShare }) {
   const [script, setScript] = useState('')
@@ -18,8 +19,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
     setNetFix({ state: 'running', lines: [] })
     try {
       const r = await axios.post('/api/aws/open-scan-paths', {
-        accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey, sessionToken: data.sessionToken,
-        region: data.region, vpcId: data.vpcId, scannerStack: data.scannerStackName || 'zpa-app-scanner',
+        ...awsAuth(data), vpcId: data.vpcId, scannerStack: data.scannerStackName || 'zpa-app-scanner',
       })
       setNetFix({ state: 'done', lines: r.data.done || [] })
     } catch (e) {
@@ -102,10 +102,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
     setFailures([])
     try {
       await axios.post('/api/aws/deploy', {
-        accessKeyId: data.accessKeyId,
-        secretAccessKey: data.secretAccessKey,
-        sessionToken: data.sessionToken,
-        region: data.region,
+        ...awsAuth(data),
         vpcId: data.vpcId,
         subnetId: data.subnetId,
         keyPairName: data.keyPairName,
@@ -127,13 +124,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
   const pollStatus = async () => {
     try {
       const r = await axios.get('/api/aws/stack-status', {
-        params: {
-          stackName: data.scannerStackName || 'zpa-app-scanner',
-          region: data.region,
-          accessKeyId: data.accessKeyId,
-          secretAccessKey: data.secretAccessKey,
-          sessionToken: data.sessionToken
-        }
+        params: { ...awsAuth(data), stackName: data.scannerStackName || 'zpa-app-scanner' }
       })
       setStackStatus(r.data.status)
       setStackOutputs(r.data.outputs || [])
@@ -155,7 +146,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
 
   // If this stack was already launched (e.g. before the page was refreshed), pick it up
   useEffect(() => {
-    if (data.target !== 'aws' || !data.accessKeyId) return
+    if (data.target !== 'aws' || !(data.accessKeyId || data.awsProfile)) return
     pollStatus().then(found => {
       if (!found) return
       setLaunched(true)
