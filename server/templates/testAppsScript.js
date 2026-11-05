@@ -1,0 +1,48 @@
+// Bash script that installs Docker and starts DVWA + Juice Shop on a Linux VM.
+// Array of strings (not a template literal) so bash ${ } never clashes with JS.
+function generateTestAppsScript() {
+  return [
+    '#!/bin/bash',
+    'set -euo pipefail',
+    'trap \'echo "SCRIPT FAILED at line $LINENO"\' ERR',
+    '',
+    'echo "=== Step 1: Installing Docker ==="',
+    'if ! command -v docker >/dev/null 2>&1; then',
+    '  if command -v apt-get >/dev/null 2>&1; then',
+    '    export DEBIAN_FRONTEND=noninteractive',
+    '    apt-get update -y',
+    '    apt-get install -y docker.io curl',
+    '  elif command -v dnf >/dev/null 2>&1; then',
+    '    dnf install -y yum-utils',
+    '    yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo',
+    '    dnf install -y docker-ce docker-ce-cli containerd.io',
+    '  else',
+    '    echo "Unsupported OS: need apt-get or dnf to install Docker"',
+    '    false',
+    '  fi',
+    'else',
+    '  echo "Docker already installed"',
+    'fi',
+    'systemctl enable --now docker',
+    '',
+    'echo "=== Step 2: Starting DVWA on port 80 ==="',
+    'docker rm -f dvwa >/dev/null 2>&1 || true',
+    'docker run -d --restart unless-stopped --name dvwa -p 80:80 vulnerables/web-dvwa',
+    '',
+    'echo "=== Step 3: Starting Juice Shop on port 3000 ==="',
+    'docker rm -f juiceshop >/dev/null 2>&1 || true',
+    'docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimminich/juice-shop',
+    '',
+    'echo "=== Step 4: Checking the apps answer ==="',
+    'sleep 20',
+    'for PORT in 80 3000; do',
+    '  CODE=$(curl -s -o /dev/null -m 10 -w "%{http_code}" "http://localhost:$PORT/" || true)',
+    '  echo "port $PORT -> HTTP ${CODE:-no answer}"',
+    'done',
+    'docker ps --format "{{.Names}}: {{.Status}}"',
+    'echo "VM_IPS: $(hostname -I)"',
+    'echo "Test apps ready!"',
+  ].join('\n')
+}
+
+module.exports = { generateTestAppsScript }

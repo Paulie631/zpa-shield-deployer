@@ -26,7 +26,7 @@ export default function Done({ data, goTo }) {
             <div className="value">{data.scannerStackName}</div>
           </div>
         )}
-        {isAWS && data.testAppsPrivateIp && (
+        {data.testAppsPrivateIp && (
           <div className="summary-item">
             <div className="label">Test Apps Instance</div>
             <div className="value">DVWA + Juice Shop @ {data.testAppsPrivateIp}</div>

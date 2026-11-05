@@ -44,6 +44,16 @@ export default function CloudShareConfig({ data, update, next, back }) {
   const [loadingEnv, setLoadingEnv]     = useState(false)
   const [selectedVm, setSelectedVm]     = useState(data.csVmId || '')
 
+  // Second VM for the test apps (DVWA + Juice Shop)
+  const [selectedTestVm, setSelectedTestVm] = useState(data.csTestVmId || '')
+  const [showAddVm, setShowAddVm]       = useState(false)
+  const [templates, setTemplates]       = useState(null)
+  const [templateId, setTemplateId]     = useState('')
+  const [templateFilter, setTemplateFilter] = useState('')
+  const [addingVm, setAddingVm]         = useState(false)
+  const [addVmStatus, setAddVmStatus]   = useState('')
+  const addPollRef = useRef(null)
+
   // Create-new-env state
   const [showCreate, setShowCreate]     = useState(false)
   const [createRegion, setCreateRegion] = useState(REGION_MIAMI)
@@ -60,7 +70,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
   }, [])
 
   // Cleanup poll on unmount
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); if (addPollRef.current) clearInterval(addPollRef.current) }, [])
 
   const connect = async () => {
     setLoading(true); setError('')
@@ -82,8 +92,12 @@ export default function CloudShareConfig({ data, update, next, back }) {
       .then(r => {
         setEnvDetail(r.data)
         const linuxVm = r.data.vms?.find(v => /linux|rhel|centos|fedora/i.test(v.os || '') || /linux|rhel|el9|connector/i.test(v.name || ''))
-        if (linuxVm) setSelectedVm(linuxVm.id)
-        else if (r.data.vms?.length === 1) setSelectedVm(r.data.vms[0].id)
+        const scannerVm = linuxVm || (r.data.vms?.length === 1 ? r.data.vms[0] : null)
+        if (scannerVm) setSelectedVm(scannerVm.id)
+        // Test apps VM: keep a previous choice, otherwise pick the other VM if there is exactly one
+        const others = (r.data.vms || []).filter(v => v.id !== scannerVm?.id)
+        if (data.csTestVmId && others.some(v => v.id === data.csTestVmId)) setSelectedTestVm(data.csTestVmId)
+        else setSelectedTestVm(others.length === 1 ? others[0].id : '')
       })
       .catch(e => setError(e.response?.data?.error || e.message))
       .finally(() => setLoadingEnv(false))
@@ -146,8 +160,57 @@ export default function CloudShareConfig({ data, update, next, back }) {
     }
   }
 
+  // ── Add a second VM (for test apps) from a CloudShare template ──
+  const LINUX_RE = /ubuntu|debian|centos|rhel|red ?hat|rocky|alma|fedora|linux/i
+  const loadTemplates = async () => {
+    setShowAddVm(true); setError('')
+    if (templates) return
+    try {
+      const r = await axios.get('/api/cloudshare/templates', { params: { apiId, apiKey, regionId: envDetail?.regionId } })
+      const list = (r.data || []).sort((a, b) => a.name.localeCompare(b.name))
+      setTemplates(list)
+      const pick = list.find(t => /ubuntu/i.test(t.name)) || list.find(t => LINUX_RE.test(t.name))
+      if (pick) setTemplateId(pick.id)
+    } catch (e) { setError(e.response?.data?.error || e.message); setTemplates([]) }
+  }
+
+  const addTestVm = async () => {
+    setAddingVm(true); setError(''); setAddVmStatus('🚀 Adding VM to the environment...')
+    const before = new Set((envDetail?.vms || []).map(v => v.id))
+    try {
+      await axios.post(`/api/cloudshare/envs/${selectedEnv}/vms`, { apiId, apiKey, templateVmId: templateId, name: 'ZPA Test Apps' })
+      setShowAddVm(false)
+      let attempts = 0
+      addPollRef.current = setInterval(async () => {
+        attempts++
+        try {
+          const detail = await axios.get(`/api/cloudshare/envs/${selectedEnv}`, { params: { apiId, apiKey } })
+          const added = (detail.data.vms || []).find(v => !before.has(v.id))
+          setAddVmStatus(`⏳ Environment: ${detail.data.statusText} | New VM: ${added?.statusText || 'not listed yet'} — please wait...`)
+          if (added && detail.data.statusText === 'Ready' && (added.statusText === 'Running' || added.statusText === 'Ready')) {
+            clearInterval(addPollRef.current)
+            setEnvDetail(detail.data); setSelectedTestVm(added.id)
+            setAddVmStatus(''); setAddingVm(false)
+          } else if (attempts > 75) { // ~10 min
+            clearInterval(addPollRef.current)
+            setEnvDetail(detail.data)
+            setAddVmStatus('⚠️ The new VM is taking longer than expected — check the CloudShare portal, then pick it here once it is running.')
+            setAddingVm(false)
+          }
+        } catch (e) { /* ignore poll errors */ }
+      }, 8000)
+    } catch (err) {
+      setAddingVm(false); setAddVmStatus('')
+      setError(err.response?.data?.error || err.message || 'Failed to add VM')
+    }
+  }
+
   const selectedVmDetail = envDetail?.vms?.find(v => v.id === selectedVm)
-  const canContinue = connected && selectedEnv && selectedVm && selectedVmDetail && !creating
+  const otherVms = (envDetail?.vms || []).filter(v => v.id !== selectedVm)
+  const testVmDetail = otherVms.find(v => v.id === selectedTestVm)
+  const shownTemplates = (templates || []).filter(t =>
+    templateFilter ? t.name.toLowerCase().includes(templateFilter.toLowerCase()) : LINUX_RE.test(t.name))
+  const canContinue = connected && selectedEnv && selectedVm && selectedVmDetail && !creating && !addingVm
 
   const handleContinue = () => {
     update({
@@ -162,6 +225,9 @@ export default function CloudShareConfig({ data, update, next, back }) {
       csUsername: selectedVmDetail?.username,
       csPassword: selectedVmDetail?.password,
       csWebAccess: selectedVmDetail?.webAccessUrl,
+      csTestVmId: testVmDetail?.id || '',
+      csTestVmName: testVmDetail?.name || '',
+      csTestVmIp: testVmDetail?.internalAddresses?.[0] || testVmDetail?.externalAddress || '',
     })
     next()
   }
@@ -181,7 +247,8 @@ export default function CloudShareConfig({ data, update, next, back }) {
             <ol style={{ margin: '8px 0 0 0', paddingLeft: '20px', lineHeight: '1.8' }}>
               <li>Enter your CloudShare API credentials</li>
               <li>Pick an existing RHEL 9 VM <em>or</em> let the wizard create one automatically</li>
-              <li>The next step generates a ready-to-run App Scanner setup script</li>
+              <li>Pick or add a second VM for the test apps (DVWA + Juice Shop)</li>
+              <li>The wizard then deploys the test apps, sets up ZPA, and installs the App Scanner</li>
             </ol>
             <div style={{ marginTop: '8px', fontSize: '13px', color: '#64748b' }}>
               💡 Find your API ID + Key at: <strong>use.cloudshare.com → Profile → API</strong>
@@ -316,7 +383,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
                         }}>
                           <input type="radio" name="vm" value={vm.id}
                             checked={selectedVm === vm.id} onChange={() => setSelectedVm(vm.id)}
-                            style={{ marginTop: '2px' }} />
+                            style={{ marginTop: '2px', width: 'auto', flex: 'none' }} />
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 600 }}>{vm.name}</div>
                             <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
@@ -358,6 +425,88 @@ export default function CloudShareConfig({ data, update, next, back }) {
                     )}
                   </div>
                 )}
+
+                {/* Second VM for the test apps */}
+                {selectedVmDetail && (
+                  <div className="form-group">
+                    <label>VM for test apps (DVWA + Juice Shop)</label>
+                    <div className="hint" style={{ marginBottom: '8px' }}>
+                      A separate Linux VM in the same environment, so the App Scanner VM keeps its resources and its reboot doesn’t take the apps down. Optional — leave it unselected to set up test apps yourself.
+                    </div>
+                    {addVmStatus && <div className="alert alert-info" style={{ marginBottom: '10px' }}>{addVmStatus}</div>}
+                    {otherVms.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
+                        {otherVms.map(vm => (
+                          <label key={vm.id} style={{
+                            display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '10px 14px',
+                            border: `2px solid ${selectedTestVm === vm.id ? '#2563eb' : '#e2e8f0'}`,
+                            borderRadius: '10px', cursor: 'pointer', background: selectedTestVm === vm.id ? '#eff6ff' : '#fff'
+                          }}>
+                            <input type="radio" name="testvm" value={vm.id}
+                              checked={selectedTestVm === vm.id} onChange={() => setSelectedTestVm(vm.id)}
+                              style={{ marginTop: '2px', width: 'auto', flex: 'none' }} />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600 }}>{vm.name}</div>
+                              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                                {vm.os} &nbsp;·&nbsp; {vm.cpuCount} vCPU &nbsp;·&nbsp; {Math.round(vm.memorySizeMb/1024)} GB RAM
+                                {vm.internalAddresses?.[0] && <span> &nbsp;·&nbsp; IP: {vm.internalAddresses[0]}</span>}
+                                <span style={{ marginLeft: '10px', color: STATUS_COLOR[vm.statusText] || '#64748b' }}>● {vm.statusText}</span>
+                              </div>
+                            </div>
+                          </label>
+                        ))}
+                        {selectedTestVm && (
+                          <button onClick={() => setSelectedTestVm('')}
+                            style={{ alignSelf: 'flex-start', fontSize: '12px', padding: '2px 8px', background: 'none', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', color: '#64748b' }}>
+                            Clear selection
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {testVmDetail && !/linux|ubuntu|debian|centos|rhel|red hat|rocky|alma/i.test((testVmDetail.os || '') + ' ' + (testVmDetail.name || '')) && (
+                      <div className="alert alert-warning" style={{ marginBottom: '10px' }}>
+                        ⚠️ This VM appears to be <strong>{testVmDetail.os}</strong>. The test apps need a Linux VM (Ubuntu/Debian or RHEL-family).
+                      </div>
+                    )}
+                    {!addingVm && !showAddVm && (
+                      <button onClick={loadTemplates}
+                        style={{ fontSize: '13px', padding: '6px 14px', background: 'none', border: '1px solid #2563eb', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}>
+                        ➕ Add a VM to this environment for test apps
+                      </button>
+                    )}
+                    {showAddVm && (
+                      <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '16px' }}>
+                        <div style={{ fontWeight: 600, marginBottom: '8px' }}>Add a Linux VM from a CloudShare template</div>
+                        {templates === null ? (
+                          <div style={{ fontSize: '13px', color: '#64748b' }}>🔄 Loading templates...</div>
+                        ) : (
+                          <>
+                            <input type="text" placeholder="Filter templates by name (default shows Linux templates)"
+                              value={templateFilter} onChange={e => setTemplateFilter(e.target.value)} style={{ marginBottom: '8px' }} />
+                            <select value={templateId} onChange={e => setTemplateId(e.target.value)}>
+                              <option value="">— Select a template ({shownTemplates.length} shown) —</option>
+                              {shownTemplates.map(t => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}{t.resources ? ` — ${t.resources.cpuCount} vCPU, ${Math.round(t.resources.memorySizeMB/1024)} GB RAM` : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="hint">Ubuntu, Debian, CentOS/RHEL/Rocky all work. 2 vCPU and 4 GB RAM is enough for both apps.</div>
+                          </>
+                        )}
+                        <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                          <button className="btn btn-primary" onClick={addTestVm} disabled={!templateId} style={{ fontSize: '13px' }}>
+                            ➕ Add VM
+                          </button>
+                          <button onClick={() => setShowAddVm(false)}
+                            style={{ fontSize: '13px', padding: '6px 14px', background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : null
           )}
@@ -367,7 +516,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
           <div className="btn-row">
             <button className="btn btn-secondary" onClick={back}>← Back</button>
             <button className="btn btn-primary" onClick={handleContinue} disabled={!canContinue}>
-              Generate Setup Script →
+              Continue →
             </button>
           </div>
         </div>

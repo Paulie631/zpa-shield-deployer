@@ -159,7 +159,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
                 )}
                 {runState === 'starting' && <div><span className="spinner spinner-blue" /> Uploading script and starting it (about a minute)...</div>}
                 {runState === 'running' && <div><span className="spinner spinner-blue" /> Script is running on the VM — log refreshes every 10 seconds</div>}
-                {runState === 'done' && <div className="alert alert-success" style={{ margin: 0 }}>✅ Setup finished — the VM is rebooting. Give it a couple of minutes before the connector shows up in ZPA.</div>}
+                {runState === 'done' && <div className="alert alert-success" style={{ margin: 0 }}><span>✅ Setup finished — the VM is rebooting. Give it a couple of minutes before the connector shows up in ZPA.</span></div>}
                 {runError && <div className="alert alert-error" style={{ marginTop: 10 }}>⚠️ {runError}</div>}
                 {runLog && (
                   <pre style={{ marginTop: 10, maxHeight: 260, overflow: 'auto', background: '#0f172a', color: '#e2e8f0', padding: 10, borderRadius: 6, fontSize: 12, whiteSpace: 'pre-wrap' }}>{runLog}</pre>

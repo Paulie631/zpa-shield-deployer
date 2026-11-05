@@ -6,6 +6,7 @@ function generateSetupScript({ ssmParamName, provisioningKey, region }) {
   const lines = [
     '#!/bin/bash',
     'set -euo pipefail',
+    'trap \'echo "SCRIPT FAILED at line $LINENO"\' ERR',
     '',
     'echo "=============================================="',
     'echo " ZPA App Scanner Setup Script"',

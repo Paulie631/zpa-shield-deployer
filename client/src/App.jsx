@@ -27,10 +27,10 @@ export default function App() {
   const steps = [
     'ZPA Credentials',
     'Choose Target',
-    isAWS ? 'AWS Config' : 'CloudShare VM',
+    isAWS ? 'AWS Config' : 'CloudShare VMs',
+    'Deploy Test Apps',
     'ZPA Setup',
     isAWS ? 'Deploy Scanner' : 'Setup Script',
-    'Deploy Test Apps',
     'Configure Scan',
     'Portal Steps',
     'Done'
@@ -43,9 +43,10 @@ export default function App() {
       case 2: return isAWS
         ? <AWSConfig data={data} update={update} next={next} back={back} />
         : <CloudShareConfig data={data} update={update} next={next} back={back} />
-      case 3: return <ZPASetup data={data} update={update} next={next} back={back} />
-      case 4: return <DeployScanner data={data} update={update} next={next} back={back} isCloudShare={isCloudShare} />
-      case 5: return <DeployTestApps data={data} update={update} next={next} back={back} />
+      // Test apps first: they need nothing from ZPA, and ZPA setup needs their address
+      case 3: return <DeployTestApps data={data} update={update} next={next} back={back} />
+      case 4: return <ZPASetup data={data} update={update} next={next} back={back} />
+      case 5: return <DeployScanner data={data} update={update} next={next} back={back} isCloudShare={isCloudShare} />
       case 6: return <ScanConfig data={data} update={update} next={next} back={back} />
       case 7: return <PortalSteps data={data} update={update} next={next} back={back} />
       case 8: return <Done data={data} goTo={goTo} />
