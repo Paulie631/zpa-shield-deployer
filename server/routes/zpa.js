@@ -182,24 +182,70 @@ router.post('/scan', async (req, res) => {
 });
 
 // POST /api/zpa/app-segments
-router.post('/app-segments', async (req, res) => {
-  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, serverGroupId, apps, customerId } = req.body;
+// POST /api/zpa/test-app-segments — create everything ZPA needs to publish the test apps:
+// a segment group, a server group (bound to an App Connector group) and one app segment per app.
+// Re-running is safe: objects with the same names are reused, not duplicated.
+const TEST_APPS = [
+  { name: 'ZPA Shield - DVWA', port: 80 },
+  { name: 'ZPA Shield - Juice Shop', port: 3000 },
+];
+const TEST_SEGMENT_GROUP = 'ZPA Shield Test Apps';
+const TEST_SERVER_GROUP = 'ZPA Shield Test Apps';
+
+async function findByName(base, headers, path, name) {
+  const r = await axios.get(`${base}/${path}`, { headers, params: { search: name, pagesize: 500 }, timeout: 15000 });
+  const list = r.data.list || (Array.isArray(r.data) ? r.data : []);
+  return list.find(x => x.name === name) || null;
+}
+
+router.post('/test-app-segments', async (req, res) => {
+  const { ip, connectorGroupId } = req.body;
+  let stage = 'connecting to ZPA';
   try {
-    const { headers, mgmtBase: base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId });
-    const created = [];
-    for (const app of apps) {
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip || ''))) throw new Error('A valid test apps IP address is required');
+    if (!connectorGroupId) throw new Error('Choose the App Connector group that will reach the test apps');
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    const steps = [];
+
+    stage = 'creating the segment group';
+    let sg = await findByName(base, headers, 'segmentGroup', TEST_SEGMENT_GROUP);
+    if (!sg) { sg = (await axios.post(`${base}/segmentGroup`, { name: TEST_SEGMENT_GROUP, enabled: true }, { headers })).data; steps.push(`Created segment group "${TEST_SEGMENT_GROUP}"`); }
+    else steps.push(`Using existing segment group "${TEST_SEGMENT_GROUP}"`);
+
+    stage = 'creating the server group';
+    let srv = await findByName(base, headers, 'serverGroup', TEST_SERVER_GROUP);
+    if (!srv) {
+      srv = (await axios.post(`${base}/serverGroup`, {
+        name: TEST_SERVER_GROUP, enabled: true, dynamicDiscovery: true,
+        appConnectorGroups: [{ id: connectorGroupId }],
+      }, { headers })).data;
+      steps.push(`Created server group "${TEST_SERVER_GROUP}"`);
+    } else steps.push(`Using existing server group "${TEST_SERVER_GROUP}"`);
+
+    const segments = [];
+    for (const app of TEST_APPS) {
+      stage = `creating the ${app.name} app segment`;
+      const existing = await findByName(base, headers, 'application', app.name);
+      if (existing) { segments.push(existing); steps.push(`"${app.name}" already exists — left unchanged`); continue; }
       const r = await axios.post(`${base}/application`, {
         name: app.name,
-        domainNames: [app.domain],
-        tcpPortRanges: [{ from: String(app.port), to: String(app.port) }],
-        serverGroups: [{ id: serverGroupId }],
-        enabled: true
+        description: 'Test app deployed by ZPA Shield Deployer',
+        enabled: true,
+        domainNames: [ip],
+        tcpPortRanges: [String(app.port), String(app.port)],   // legacy format: [from, to] pairs as strings
+        segmentGroupId: sg.id,
+        serverGroups: [{ id: srv.id }],
+        bypassType: 'NEVER',
+        healthReporting: 'ON_ACCESS',
+        healthCheckType: 'DEFAULT',
       }, { headers });
-      created.push({ name: app.name, id: r.data.id, domain: app.domain });
+      segments.push(r.data);
+      steps.push(`Created app segment "${app.name}" → ${ip}:${app.port}`);
     }
-    res.json({ created });
+    res.json({ segments: segments.map(s => ({ id: s.id, name: s.name, domainNames: s.domainNames })), steps });
   } catch (err) {
-    res.status(400).json({ error: zpaError(err) });
+    console.error('[test-app-segments error]', stage, err.response?.status, JSON.stringify(err.response?.data));
+    res.status(400).json({ error: `Failed while ${stage}: ${zpaError(err)}` });
   }
 });
 

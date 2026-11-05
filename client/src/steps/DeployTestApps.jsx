@@ -211,7 +211,7 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
 
       {privateIp && (
         <div className="alert alert-success" style={{ marginTop: 12 }}>
-          <span>✅ <strong>Note this address:</strong> in ZPA Admin Portal, create two app segments pointing to <strong>{privateIp}</strong> — one for DVWA (port 80) and one for Juice Shop (port 3000). Then select them in the scan config.</span>
+          <span>✅ <strong>Test apps at {privateIp}.</strong> The Configure Scan step can create their ZPA app segments for you (DVWA on port 80, Juice Shop on port 3000).</span>
         </div>
       )}
 
