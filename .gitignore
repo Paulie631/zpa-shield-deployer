@@ -6,3 +6,4 @@ client/dist/
 *.local
 .DS_Store
 *.zip
+server-restart.log

@@ -132,14 +132,31 @@ function downloadFile(url, dest) {
 }
 
 function restartApp() {
-  // Try pm2 first, then nodemon signal, then hard exit (process manager should restart)
+  // pm2-managed installs: let pm2 restart us
   try {
-    execSync('pm2 restart zpa-shield-deployer 2>/dev/null || true', { stdio: 'pipe' });
+    execSync('command -v pm2 >/dev/null 2>&1 && pm2 describe zpa-shield-deployer >/dev/null 2>&1', { stdio: 'pipe' });
+    execSync('pm2 restart zpa-shield-deployer', { stdio: 'pipe' });
     return;
-  } catch (e) {}
-  // Fallback: exit and let the process manager restart
-  console.log('Restarting process...');
-  setTimeout(() => process.exit(0), 1000);
+  } catch (e) { /* not running under pm2 */ }
+
+  // Normal installs (start.sh / npm run dev): nothing restarts the backend for us,
+  // so start a fresh copy once this one has released the port, then exit.
+  // The frontend (Vite) picks up the new files on its own.
+  console.log('Restarting backend with the updated code...');
+  const logPath = path.join(APP_ROOT, 'server-restart.log');
+  const out = fs.openSync(logPath, 'a');
+  const child = spawn(process.execPath, ['-e', `
+    const net = require('net');
+    const port = ${Number(process.env.PORT || 3001)};
+    const tryStart = (n) => {
+      const s = net.createServer().once('error', () => n > 0 ? setTimeout(() => tryStart(n - 1), 500) : process.exit(1))
+        .once('listening', () => s.close(() => require(${JSON.stringify(path.join(APP_ROOT, 'server/index.js'))})))
+        .listen(port);
+    };
+    tryStart(40);
+  `], { cwd: APP_ROOT, detached: true, stdio: ['ignore', out, out], env: process.env });
+  child.unref();
+  setTimeout(() => process.exit(0), 300);
 }
 
 function compareVersions(a, b) {
