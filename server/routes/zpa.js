@@ -355,6 +355,69 @@ router.post('/verify-publish', async (req, res) => {
   }
 });
 
+// POST /api/zpa/teardown — remove the objects this wizard created, in dependency order:
+// access rule -> app segments -> server group -> segment group -> traffic connectors + keys + group
+// (-> the App Scanner connector group, only if asked). Only wizard-named objects are touched.
+router.post('/teardown', async (req, res) => {
+  const { includeScannerGroup, scannerGroupId } = req.body;
+  const results = [];
+  const note = (item, ok, detail) => results.push({ item, ok, detail });
+  try {
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    const v2 = base.replace('/mgmtconfig/v1/', '/mgmtconfig/v2/');
+    const del = async (item, path) => {
+      try { await axios.delete(`${base}/${path}`, { headers, timeout: 15000 }); note(item, true, 'deleted'); }
+      catch (e) { note(item, false, zpaError(e)); }
+    };
+
+    // Access rule
+    const rule = await findByName(base, headers, 'policySet/rules/policyType/ACCESS_POLICY', ACCESS_RULE);
+    if (rule) {
+      const ps = (await axios.get(`${base}/policySet/policyType/ACCESS_POLICY`, { headers, timeout: 15000 })).data;
+      await del(`Access rule "${ACCESS_RULE}"`, `policySet/${ps.id}/rule/${rule.id}`);
+    } else note(`Access rule "${ACCESS_RULE}"`, true, 'already gone');
+
+    // App segments
+    for (const app of TEST_APPS) {
+      const seg = await findByName(base, headers, 'application', app.name);
+      if (seg) await del(`App segment "${app.name}"`, `application/${seg.id}?forceDelete=true`);
+      else note(`App segment "${app.name}"`, true, 'already gone');
+    }
+
+    // Server group, segment group
+    const srv = await findByName(base, headers, 'serverGroup', TEST_SERVER_GROUP);
+    if (srv) await del(`Server group "${TEST_SERVER_GROUP}"`, `serverGroup/${srv.id}`); else note(`Server group "${TEST_SERVER_GROUP}"`, true, 'already gone');
+    const sg = await findByName(base, headers, 'segmentGroup', TEST_SEGMENT_GROUP);
+    if (sg) await del(`Segment group "${TEST_SEGMENT_GROUP}"`, `segmentGroup/${sg.id}`); else note(`Segment group "${TEST_SEGMENT_GROUP}"`, true, 'already gone');
+
+    // Connector groups: their connectors and provisioning keys first
+    const groups = [{ name: TRAFFIC_GROUP, id: (await findByName(base, headers, 'appConnectorGroup', TRAFFIC_GROUP))?.id }];
+    if (includeScannerGroup && scannerGroupId) groups.push({ name: 'App Scanner group', id: scannerGroupId });
+    for (const g of groups) {
+      if (!g.id) { note(`Connector group "${g.name}"`, true, 'already gone'); continue; }
+      let conns = [];
+      try {
+        for (let page = 1; page <= 10; page++) {
+          const r = await axios.get(`${base}/connector`, { headers, params: { page, pagesize: 500 }, timeout: 15000 });
+          conns.push(...(r.data.list || []).filter(c => c.appConnectorGroupId === g.id));
+          if (page >= (parseInt(r.data.totalPages, 10) || 1)) break;
+        }
+      } catch (e) { note(`Connectors in "${g.name}"`, false, zpaError(e)); }
+      for (const c of conns) await del(`Connector "${c.name}"`, `connector/${c.id}`);
+      try {
+        const keys = (await axios.get(`${base}/associationType/CONNECTOR_GRP/provisioningKey`, { headers, params: { pagesize: 500 }, timeout: 15000 })).data.list || [];
+        for (const k of keys.filter(k => String(k.zcomponentId) === String(g.id) || String(k.appConnectorGroupId) === String(g.id))) {
+          await del(`Provisioning key "${k.name}"`, `associationType/CONNECTOR_GRP/provisioningKey/${k.id}`);
+        }
+      } catch (e) { note(`Provisioning keys for "${g.name}"`, false, zpaError(e)); }
+      await del(`Connector group "${g.name}"`, `appConnectorGroup/${g.id}`);
+    }
+    res.json({ results, allOk: results.every(r => r.ok) });
+  } catch (err) {
+    res.status(400).json({ error: zpaError(err), results });
+  }
+});
+
 router.post('/test-app-segments', async (req, res) => {
   const { ip, connectorGroupId } = req.body;
   let stage = 'connecting to ZPA';

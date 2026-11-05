@@ -1,5 +1,6 @@
 import React from 'react'
 import { zpaPortalBase } from '../lib/zpa'
+import TearDown from '../components/TearDown'
 
 export default function Done({ data, goTo }) {
   const isAWS = data.target === 'aws'
@@ -76,6 +77,9 @@ export default function Done({ data, goTo }) {
         <li>Start with <strong>Monitor mode</strong> — review AppProtection logs</li>
         <li>Switch confirmed controls to <strong>Block mode</strong></li>
       </ol>
+
+      <hr className="divider" />
+      <TearDown data={data} />
 
       <div className="btn-row" style={{ justifyContent: 'center', marginTop: 32 }}>
         <button className="btn btn-secondary" onClick={() => goTo(0)}>

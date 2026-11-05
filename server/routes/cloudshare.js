@@ -51,7 +51,23 @@ async function csPut(apiId, apiKey, path, body = {}) {
   return res.data;
 }
 
+async function csDelete(apiId, apiKey, path) {
+  const res = await axios.delete(CS_BASE + path, { headers: csHeaders(apiId, apiKey, path), timeout: 15000 });
+  return res.data;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
+
+// DELETE /api/cloudshare/envs/:envId — delete an environment (used by tear-down for the test client)
+router.delete('/envs/:envId', async (req, res) => {
+  const { apiId, apiKey } = req.query;
+  try {
+    await csDelete(apiId, apiKey, `/api/v3/envs/${encodeURIComponent(req.params.envId)}`);
+    res.json({ deleted: true });
+  } catch (err) {
+    res.status(400).json({ error: csError(err) });
+  }
+});
 
 // GET /api/cloudshare/validate — test credentials + return environments
 router.get('/validate', async (req, res) => {

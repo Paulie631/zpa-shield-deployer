@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { CloudFormationClient, CreateStackCommand, DescribeStacksCommand, DescribeStackEventsCommand, DeleteStackCommand, DescribeStackResourceCommand } = require('@aws-sdk/client-cloudformation');
 const { EC2Client, DescribeVpcsCommand, DescribeSubnetsCommand, DescribeKeyPairsCommand, DescribeImagesCommand, AuthorizeSecurityGroupIngressCommand, AuthorizeSecurityGroupEgressCommand } = require('@aws-sdk/client-ec2');
+const { DeleteParameterCommand } = require('@aws-sdk/client-ssm');
 const { SSMClient, PutParameterCommand } = require('@aws-sdk/client-ssm');
 const { fromNodeProviderChain } = require('@aws-sdk/credential-providers');
 const { STSClient, GetCallerIdentityCommand } = require('@aws-sdk/client-sts');
@@ -349,6 +350,35 @@ router.post('/deploy-traffic-connector', async (req, res) => {
     res.json({ stackName: finalStackName, reused });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/aws/teardown — delete the stacks this wizard created (and the SSM key parameter).
+// Only stack names from the wizard are accepted. Deletion runs in AWS; status is polled via /stack-status.
+const WIZARD_STACKS = ['zpa-traffic-connector', 'zpa-app-scanner', 'zpa-test-apps'];
+router.post('/teardown', async (req, res) => {
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region, stacks = WIZARD_STACKS, ssmParamName } = req.body;
+  const results = [];
+  try {
+    const { cfn, ssm } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
+    for (const name of stacks) {
+      if (!WIZARD_STACKS.includes(name) && !/^zpa-/.test(name)) { results.push({ item: name, ok: false, detail: 'not a wizard stack' }); continue; }
+      try {
+        await cfn.send(new DescribeStacksCommand({ StackName: name }));
+        await cfn.send(new DeleteStackCommand({ StackName: name }));
+        results.push({ item: `Stack ${name}`, ok: true, detail: 'deletion started' });
+      } catch (e) {
+        if (/does not exist/i.test(e.message || '')) results.push({ item: `Stack ${name}`, ok: true, detail: 'already gone' });
+        else results.push({ item: `Stack ${name}`, ok: false, detail: e.message });
+      }
+    }
+    if (ssmParamName) {
+      try { await ssm.send(new DeleteParameterCommand({ Name: ssmParamName })); results.push({ item: `SSM parameter ${ssmParamName}`, ok: true, detail: 'deleted' }); }
+      catch (e) { results.push({ item: `SSM parameter ${ssmParamName}`, ok: /ParameterNotFound/.test(e.name || e.message || ''), detail: /ParameterNotFound/.test(e.name || e.message || '') ? 'already gone' : e.message }); }
+    }
+    res.json({ results });
+  } catch (err) {
+    res.status(400).json({ error: credentialError(err, awsProfile), results });
   }
 });
 
