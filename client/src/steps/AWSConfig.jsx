@@ -54,7 +54,7 @@ export default function AWSConfig({ data, update, next, back }) {
       <h2>AWS Configuration</h2>
       <p className="subtitle">Enter your AWS credentials and select the target VPC, subnet, and key pair for the App Scanner instance.</p>
 
-      <div className="disclaimer">🔒 AWS credentials are used only for this deployment request and are never stored.</div>
+      <div className="disclaimer">🔒 AWS credentials go only to AWS. The wizard keeps them in this browser tab so your progress survives a page refresh, and forgets them when you close the tab.</div>
 
       <div className="form-row">
         <div className="form-group">

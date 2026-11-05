@@ -127,10 +127,24 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
           update({ scannerPrivateIp: privateIp })
         }
       }
-    } catch (e) { /* ignore transient poll errors */ }
+      return r.data.status
+    } catch (e) { return null /* not launched yet, or a transient poll error */ }
   }
 
   useEffect(() => () => clearInterval(pollRef.current), [])
+
+  // If this stack was already launched (e.g. before the page was refreshed), pick it up
+  useEffect(() => {
+    if (data.target !== 'aws' || !data.accessKeyId) return
+    pollStatus().then(found => {
+      if (!found) return
+      setLaunched(true)
+      if (!['CREATE_COMPLETE'].includes(found) && !/FAILED|ROLLBACK/.test(found)) {
+        setDeploying(true)
+        pollRef.current = setInterval(pollStatus, 5000)
+      }
+    })
+  }, [])
 
   const statusClass = stackStatus === 'CREATE_COMPLETE' ? 'complete'
     : stackStatus.includes('FAILED') || stackStatus.includes('ROLLBACK') ? 'failed'

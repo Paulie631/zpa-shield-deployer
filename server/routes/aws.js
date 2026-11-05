@@ -31,6 +31,18 @@ async function rhel9Ami(ec2, region) {
 
 // sessionToken is needed for temporary keys (access key IDs starting with ASIA),
 // e.g. from the AWS access portal / IAM Identity Center
+// Create a stack; if one with this name already exists (e.g. deployed before a page
+// refresh), use it rather than failing — the wizard then just tracks its status.
+async function createStackOrReuse(cfn, params) {
+  try {
+    await cfn.send(new CreateStackCommand(params));
+    return false;
+  } catch (e) {
+    if (e.name === 'AlreadyExistsException' || /already exists/i.test(e.message || '')) return true;
+    throw e;
+  }
+}
+
 function awsClients(accessKeyId, secretAccessKey, region, sessionToken) {
   const credentials = { accessKeyId: (accessKeyId || '').trim(), secretAccessKey: (secretAccessKey || '').trim() };
   if (sessionToken && sessionToken.trim()) credentials.sessionToken = sessionToken.trim();
@@ -82,11 +94,11 @@ router.post('/deploy', async (req, res) => {
     const template = generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSize, script, imageId, ssmParamName: ssmParamName || '/zpa/provisioning-key' });
 
     const finalStackName = stackName || 'zpa-app-scanner';
-    await cfn.send(new CreateStackCommand({
+    await createStackOrReuse(cfn, {
       StackName: finalStackName,
       TemplateBody: template,
       Capabilities: ['CAPABILITY_IAM']
-    }));
+    });
 
     res.json({
       stackName: finalStackName,
@@ -158,11 +170,11 @@ router.post('/deploy-test-apps', async (req, res) => {
     });
 
     const finalStackName = stackName || 'zpa-test-apps';
-    await cfn.send(new CreateStackCommand({
+    await createStackOrReuse(cfn, {
       StackName: finalStackName,
       TemplateBody: template,
       Capabilities: ['CAPABILITY_IAM']
-    }));
+    });
 
     res.json({
       stackName: finalStackName,

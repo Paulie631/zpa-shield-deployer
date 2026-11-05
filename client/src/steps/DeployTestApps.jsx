@@ -112,10 +112,24 @@ export default function DeployTestApps({ data, update, next, back }) {
         clearInterval(pollRef.current)
         setDeploying(false)
       }
-    } catch (e) {}
+      return r.data.status
+    } catch (e) { return null }
   }
 
   useEffect(() => () => clearInterval(pollRef.current), [])
+
+  // If this stack was already launched (e.g. before the page was refreshed), pick it up
+  useEffect(() => {
+    if (data.target !== 'aws' || !data.accessKeyId) return
+    pollStatus().then(found => {
+      if (!found) return
+      setLaunched(true)
+      if (!['CREATE_COMPLETE'].includes(found) && !/FAILED|ROLLBACK/.test(found)) {
+        setDeploying(true)
+        pollRef.current = setInterval(pollStatus, 5000)
+      }
+    })
+  }, [])
 
   const handleSkip = () => {
     setSkipped(true)

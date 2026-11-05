@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import WizardShell from './components/WizardShell'
 import ZPACredentials from './steps/ZPACredentials'
 import ChooseTarget from './steps/ChooseTarget'
@@ -11,9 +11,27 @@ import ScanConfig from './steps/ScanConfig'
 import PortalSteps from './steps/PortalSteps'
 import Done from './steps/Done'
 
+// Progress survives page refreshes (like the one after installing an update) but not
+// closing the tab: sessionStorage is per-tab and cleared when the tab closes.
+const PROGRESS_KEY = 'zpa-shield-wizard-progress'
+function loadProgress() {
+  try { return JSON.parse(sessionStorage.getItem(PROGRESS_KEY)) || {} } catch { return {} }
+}
+
 export default function App() {
-  const [step, setStep] = useState(0)
-  const [data, setData] = useState({})
+  const saved = loadProgress()
+  const [step, setStep] = useState(Number.isInteger(saved.step) ? saved.step : 0)
+  const [data, setData] = useState(saved.data || {})
+
+  useEffect(() => {
+    try { sessionStorage.setItem(PROGRESS_KEY, JSON.stringify({ step, data })) } catch {}
+  }, [step, data])
+
+  const startOver = () => {
+    if (!window.confirm('Start the wizard over? Anything already deployed stays where it is.')) return
+    try { sessionStorage.removeItem(PROGRESS_KEY) } catch {}
+    setData({}); setStep(0)
+  }
 
   const update = (patch) => setData(d => ({ ...d, ...patch }))
   const next = () => setStep(s => s + 1)
@@ -56,6 +74,11 @@ export default function App() {
 
   return (
     <WizardShell steps={steps} currentStep={step}>
+      {step > 0 && (
+        <div style={{ textAlign: 'right', marginBottom: 8 }}>
+          <button onClick={startOver} style={{ fontSize: 12, padding: '3px 10px', background: 'none', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', color: '#64748b' }}>↺ Start over</button>
+        </div>
+      )}
       {renderStep()}
     </WizardShell>
   )
