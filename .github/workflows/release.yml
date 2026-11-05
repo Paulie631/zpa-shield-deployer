@@ -1,0 +1,51 @@
+name: Release
+
+# Run manually: Actions tab -> Release -> Run workflow.
+# Publishes a GitHub release for the version in package.json, with the zip
+# the in-app updater and install.sh download.
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Release notes (leave blank to auto-generate from commits)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: v
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if this version is already released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+            echo "::error::v${{ steps.v.outputs.version }} is already released. Bump the version in package.json first."
+            exit 1
+          fi
+
+      - name: Build zip
+        run: git archive --format=zip --prefix=zpa-shield-deployer/ -o "zpa-shield-deployer-v${{ steps.v.outputs.version }}.zip" HEAD
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          TAG="v${{ steps.v.outputs.version }}"
+          if [ -n "$NOTES" ]; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES" \
+              "zpa-shield-deployer-$TAG.zip" install.sh install.bat
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes \
+              "zpa-shield-deployer-$TAG.zip" install.sh install.bat
+          fi
