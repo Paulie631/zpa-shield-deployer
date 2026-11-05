@@ -1,0 +1,35 @@
+name: Test
+
+# Runs the end-to-end browser test (test/e2e.js) against the fake backend.
+# Called by release.yml before publishing, and on every push / pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix client
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Keep screenshots and logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-output
+          path: |
+            test/out/
+            test/out-*.log

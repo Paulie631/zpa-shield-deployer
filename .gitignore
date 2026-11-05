@@ -7,3 +7,5 @@ client/dist/
 .DS_Store
 *.zip
 server-restart.log
+test/out/
+test/out-*.log

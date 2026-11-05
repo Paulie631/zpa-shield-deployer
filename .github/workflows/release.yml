@@ -18,7 +18,12 @@ permissions:
   contents: write
 
 jobs:
+  # The browser test must pass before anything is published to the update button
+  test:
+    uses: ./.github/workflows/test.yml
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
