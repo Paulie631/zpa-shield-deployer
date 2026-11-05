@@ -206,6 +206,102 @@ async function findByName(base, headers, path, name) {
   return null;
 }
 
+// The tenant's "Connector" enrollment certificate (needed for connector groups and keys)
+async function connectorCertId(mgmtBase, headers) {
+  const cr = await axios.get(ENROLLMENT_CERT_URL(mgmtBase), { headers, params: { search: 'Connector' }, timeout: 10000 });
+  const certs = cr.data.list || cr.data.enrollmentCerts || (Array.isArray(cr.data) ? cr.data : []);
+  const cert = certs.find(c => (c.name || '').toLowerCase() === 'connector') || certs.find(c => /connector/i.test(c.name || ''));
+  if (!cert) throw new Error('No "Connector" enrollment certificate found in this ZPA tenant');
+  return cert.id;
+}
+
+const TRAFFIC_GROUP = 'ZPA Shield Traffic Connectors';
+const TRAFFIC_KEY = 'ZPA Shield Traffic Connector key';
+
+// POST /api/zpa/traffic-connector — connector group + provisioning key for an ordinary
+// (traffic-forwarding) App Connector, and point the test apps' server group at it so the
+// App Scanner group stays dedicated to scanning. Re-running reuses what exists.
+router.post('/traffic-connector', async (req, res) => {
+  let stage = 'connecting to ZPA';
+  try {
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    const steps = [];
+
+    stage = 'creating the connector group';
+    const certId = await connectorCertId(base, headers);
+    let group = await findByName(base, headers, 'appConnectorGroup', TRAFFIC_GROUP);
+    if (!group) {
+      group = (await axios.post(`${base}/appConnectorGroup`, {
+        name: TRAFFIC_GROUP, enrollmentCertId: certId, enabled: true,
+        description: 'Forwards user traffic to the ZPA Shield test apps - created by ZPA Shield Deployer',
+        latitude: '37.3382', longitude: '-121.8863', location: 'San Jose, CA',
+        upgradeDay: 'SUNDAY', upgradeTimeInSecs: '66600',
+        overrideVersionProfile: true, versionProfileId: '0', dnsQueryType: 'IPV4_IPV6',
+      }, { headers, timeout: 15000 })).data;
+      steps.push(`Created connector group "${TRAFFIC_GROUP}"`);
+    } else steps.push(`Using existing connector group "${TRAFFIC_GROUP}"`);
+
+    stage = 'creating the provisioning key';
+    const keysPath = 'associationType/CONNECTOR_GRP/provisioningKey';
+    let key = await findByName(base, headers, keysPath, TRAFFIC_KEY);
+    if (!key || !key.provisioningKey) {
+      key = (await axios.post(`${base}/${keysPath}`, {
+        name: key ? `${TRAFFIC_KEY} ${Date.now()}` : TRAFFIC_KEY, maxUsage: '10',
+        appConnectorGroupId: group.id, enrollmentCertId: certId, zcomponentId: group.id,
+      }, { headers, timeout: 15000 })).data;
+      steps.push('Created a provisioning key for it');
+    } else steps.push('Using its existing provisioning key');
+
+    stage = 'pointing the test apps at the new connector group';
+    const srv = await findByName(base, headers, 'serverGroup', TEST_SERVER_GROUP);
+    if (srv) {
+      const full = (await axios.get(`${base}/serverGroup/${srv.id}`, { headers, timeout: 15000 })).data;
+      if (!(full.appConnectorGroups || []).some(g => g.id === group.id) || (full.appConnectorGroups || []).length !== 1) {
+        await axios.put(`${base}/serverGroup/${srv.id}`, { ...full, appConnectorGroups: [{ id: group.id }] }, { headers, timeout: 15000 });
+        steps.push(`Server group "${TEST_SERVER_GROUP}" now uses "${TRAFFIC_GROUP}"`);
+      }
+    }
+
+    res.json({ groupId: group.id, provisioningKey: key.provisioningKey, steps });
+  } catch (err) {
+    console.error('[traffic-connector error]', stage, err.response?.status, JSON.stringify(err.response?.data));
+    res.status(400).json({ error: `Failed while ${stage}: ${zpaError(err)}` });
+  }
+});
+
+const ACCESS_RULE = 'ZPA Shield - allow test apps';
+
+// POST /api/zpa/test-apps-access-rule — access policy rule allowing the test apps' segment group
+// (v2 rule format, as in zscaler-sdk-python add_access_rule_v2). Re-running reuses the rule.
+router.post('/test-apps-access-rule', async (req, res) => {
+  let stage = 'connecting to ZPA';
+  try {
+    const { headers, mgmtBase: base } = await getClient(req.body);
+
+    stage = 'finding the test apps segment group';
+    const sg = await findByName(base, headers, 'segmentGroup', TEST_SEGMENT_GROUP);
+    if (!sg) throw new Error(`Segment group "${TEST_SEGMENT_GROUP}" not found — create the test app segments first`);
+
+    stage = 'reading the access policy';
+    const policySet = (await axios.get(`${base}/policySet/policyType/ACCESS_POLICY`, { headers, timeout: 15000 })).data;
+    const existing = await findByName(base, headers, 'policySet/rules/policyType/ACCESS_POLICY', ACCESS_RULE);
+    if (existing) return res.json({ ruleId: existing.id, steps: [`Access rule "${ACCESS_RULE}" already exists`] });
+
+    stage = 'creating the access rule';
+    const v2 = base.replace('/mgmtconfig/v1/', '/mgmtconfig/v2/');
+    const rule = (await axios.post(`${v2}/policySet/${policySet.id}/rule`, {
+      name: ACCESS_RULE,
+      description: 'Lets users reach DVWA and Juice Shop through ZPA - created by ZPA Shield Deployer',
+      action: 'ALLOW',
+      conditions: [{ operands: [{ objectType: 'APP_GROUP', values: [sg.id] }] }],
+    }, { headers, timeout: 15000 })).data;
+    res.json({ ruleId: rule.id, steps: [`Created access rule "${ACCESS_RULE}" for segment group "${TEST_SEGMENT_GROUP}"`] });
+  } catch (err) {
+    console.error('[access-rule error]', stage, err.response?.status, JSON.stringify(err.response?.data));
+    res.status(400).json({ error: `Failed while ${stage}: ${zpaError(err)}` });
+  }
+});
+
 router.post('/test-app-segments', async (req, res) => {
   const { ip, connectorGroupId } = req.body;
   let stage = 'connecting to ZPA';

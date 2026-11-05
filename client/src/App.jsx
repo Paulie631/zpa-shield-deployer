@@ -10,6 +10,7 @@ import DeployTestApps from './steps/DeployTestApps'
 import ScanConfig from './steps/ScanConfig'
 import PortalSteps from './steps/PortalSteps'
 import Done from './steps/Done'
+import PublishApps from './steps/PublishApps'
 
 // Progress survives page refreshes (like the one after installing an update) but not
 // closing the tab: sessionStorage is per-tab and cleared when the tab closes.
@@ -49,6 +50,7 @@ export default function App() {
     'Deploy Test Apps',
     'ZPA Setup',
     isAWS ? 'Deploy Scanner' : 'Setup Script',
+    'Publish Apps',
     'Configure Scan',
     'Portal Steps',
     'Done'
@@ -65,9 +67,10 @@ export default function App() {
       case 3: return <DeployTestApps data={data} update={update} next={next} back={back} />
       case 4: return <ZPASetup data={data} update={update} next={next} back={back} />
       case 5: return <DeployScanner data={data} update={update} next={next} back={back} isCloudShare={isCloudShare} />
-      case 6: return <ScanConfig data={data} update={update} next={next} back={back} />
-      case 7: return <PortalSteps data={data} update={update} next={next} back={back} />
-      case 8: return <Done data={data} goTo={goTo} />
+      case 6: return <PublishApps data={data} update={update} next={next} back={back} />
+      case 7: return <ScanConfig data={data} update={update} next={next} back={back} />
+      case 8: return <PortalSteps data={data} update={update} next={next} back={back} />
+      case 9: return <Done data={data} goTo={goTo} />
       default: return null
     }
   }

@@ -6,6 +6,7 @@ const { SSMClient, PutParameterCommand } = require('@aws-sdk/client-ssm');
 const { generateCfnTemplate } = require('../templates/cfnTemplate');
 const { generateSetupScript } = require('../templates/setupScript');
 const { generateTestAppsScript } = require('../templates/testAppsScript');
+const { generateConnectorScript } = require('../templates/connectorScript');
 
 // Latest official RHEL 9 x86_64 AMI in this region (Red Hat's AWS account), so stacks
 // work outside us-east-1. Falls back to the known us-east-1 image if the lookup fails.
@@ -235,6 +236,56 @@ router.post('/deploy-test-apps', async (req, res) => {
         { name: 'Juice Shop', port: 3000, domain: 'juiceshop.internal' }
       ]
     });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/aws/deploy-traffic-connector — an ordinary App Connector in the VPC that
+// forwards user traffic to the test apps (outbound 443 to Zscaler, plus the VPC)
+router.post('/deploy-traffic-connector', async (req, res) => {
+  const { accessKeyId, secretAccessKey, sessionToken, region, vpcId, subnetId, keyPairName, provisioningKey, stackName } = req.body;
+  try {
+    if (!provisioningKey) throw new Error('No provisioning key for the traffic connector');
+    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
+    const imageId = await rhel9Ami(ec2, region);
+    const cidr = await vpcCidr(ec2, vpcId);
+    const template = JSON.stringify({
+      AWSTemplateFormatVersion: '2010-09-09',
+      Description: 'ZPA Shield - App Connector for the test apps',
+      Resources: {
+        TrafficConnectorSecurityGroup: {
+          Type: 'AWS::EC2::SecurityGroup',
+          Properties: {
+            GroupDescription: 'ZPA traffic connector - outbound 443 plus the VPC, no inbound',
+            VpcId: vpcId,
+            SecurityGroupEgress: [
+              { IpProtocol: 'tcp', FromPort: 443, ToPort: 443, CidrIp: '0.0.0.0/0', Description: 'Zscaler cloud and repos' },
+              { IpProtocol: '-1', CidrIp: cidr, Description: 'Apps inside the VPC' },
+            ],
+          },
+        },
+        TrafficConnectorInstance: {
+          Type: 'AWS::EC2::Instance',
+          Properties: {
+            ImageId: imageId,
+            InstanceType: 't3.medium',
+            KeyName: keyPairName,
+            SubnetId: subnetId,
+            SecurityGroupIds: [{ Ref: 'TrafficConnectorSecurityGroup' }],
+            UserData: Buffer.from(generateConnectorScript({ provisioningKey })).toString('base64'),
+            Tags: [{ Key: 'Name', Value: 'zpa-traffic-connector' }],
+          },
+        },
+      },
+      Outputs: {
+        InstanceId: { Value: { Ref: 'TrafficConnectorInstance' } },
+        PrivateIp: { Value: { 'Fn::GetAtt': ['TrafficConnectorInstance', 'PrivateIp'] } },
+      },
+    });
+    const finalStackName = stackName || 'zpa-traffic-connector';
+    const reused = await createStackOrReuse(cfn, { StackName: finalStackName, TemplateBody: template });
+    res.json({ stackName: finalStackName, reused });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
