@@ -12,6 +12,7 @@ export default function AWSConfig({ data, update, next, back }) {
   const [form, setForm] = useState({
     accessKeyId: data.accessKeyId || '',
     secretAccessKey: data.secretAccessKey || '',
+    sessionToken: data.sessionToken || '',
     region: data.region || 'us-east-1',
     vpcId: data.vpcId || '',
     subnetId: data.subnetId || '',
@@ -33,7 +34,7 @@ export default function AWSConfig({ data, update, next, back }) {
     setResourceError('')
     try {
       const res = await axios.get('/api/aws/resources', {
-        params: { accessKeyId: form.accessKeyId, secretAccessKey: form.secretAccessKey, region: form.region }
+        params: { accessKeyId: form.accessKeyId, secretAccessKey: form.secretAccessKey, sessionToken: form.sessionToken, region: form.region }
       })
       setResources(res.data)
     } catch (err) {
@@ -45,7 +46,8 @@ export default function AWSConfig({ data, update, next, back }) {
 
   const filteredSubnets = resources.subnets.filter(s => !form.vpcId || s.vpcId === form.vpcId)
 
-  const canContinue = form.accessKeyId && form.secretAccessKey && form.region && form.vpcId && form.subnetId && form.keyPairName
+  const isTempKey = /^ASIA/.test((form.accessKeyId || '').trim())
+  const canContinue = form.accessKeyId && form.secretAccessKey && (!isTempKey || form.sessionToken) && form.region && form.vpcId && form.subnetId && form.keyPairName
 
   return (
     <div className="card">
@@ -67,6 +69,20 @@ export default function AWSConfig({ data, update, next, back }) {
         </div>
       </div>
 
+      <div className="form-group">
+        <label>AWS Session Token {isTempKey ? <span style={{ color: '#dc2626' }}>*</span> : <span style={{ color: '#9ca3af', fontWeight: 400 }}>(only for temporary keys)</span>}</label>
+        <input type="password" placeholder="IQoJb3JpZ2luX2VjE... (from the AWS access portal)" value={form.sessionToken}
+          onChange={e => set('sessionToken', e.target.value)} />
+        {isTempKey && !form.sessionToken && (
+          <div className="hint" style={{ color: '#dc2626' }}>
+            This is a temporary key (starts with ASIA), so AWS also needs its session token. In the AWS access portal, open “Access keys” for your account and copy <strong>AWS_SESSION_TOKEN</strong> as well.
+          </div>
+        )}
+        {isTempKey && form.sessionToken && (
+          <div className="hint">Temporary keys expire (usually after 1–12 hours). If AWS starts rejecting them, copy fresh ones from the portal.</div>
+        )}
+      </div>
+
       <div className="form-row">
         <div className="form-group">
           <label>Region</label>
@@ -75,7 +91,7 @@ export default function AWSConfig({ data, update, next, back }) {
           </select>
         </div>
         <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
-          <button className="btn btn-secondary" style={{ width: '100%' }} onClick={fetchResources} disabled={loadingResources || !form.accessKeyId || !form.secretAccessKey}>
+          <button className="btn btn-secondary" style={{ width: '100%' }} onClick={fetchResources} disabled={loadingResources || !form.accessKeyId || !form.secretAccessKey || (isTempKey && !form.sessionToken)}>
             {loadingResources ? <><span className="spinner spinner-blue" /> Loading...</> : '🔍 Load VPCs & Subnets'}
           </button>
         </div>
@@ -140,7 +156,7 @@ export default function AWSConfig({ data, update, next, back }) {
       </div>
 
       <div className="alert alert-warning">
-        ⚠️ <strong>AMI Note:</strong> The default AMI is RHEL 9 for us-east-1. For other regions, update the AMI in the template preview before deploying. Find region AMIs at <a href="https://access.redhat.com/solutions/15356" target="_blank" rel="noreferrer">Red Hat's AMI list</a>.
+        ℹ️ <strong>AMI:</strong> the wizard picks the latest official RHEL 9 image for the region you choose.
       </div>
 
       {error && <div className="alert alert-error">⚠️ {error}</div>}

@@ -86,6 +86,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
       await axios.post('/api/aws/deploy', {
         accessKeyId: data.accessKeyId,
         secretAccessKey: data.secretAccessKey,
+        sessionToken: data.sessionToken,
         region: data.region,
         vpcId: data.vpcId,
         subnetId: data.subnetId,
@@ -112,7 +113,8 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
           stackName: data.scannerStackName || 'zpa-app-scanner',
           region: data.region,
           accessKeyId: data.accessKeyId,
-          secretAccessKey: data.secretAccessKey
+          secretAccessKey: data.secretAccessKey,
+          sessionToken: data.sessionToken
         }
       })
       setStackStatus(r.data.status)

@@ -29,8 +29,12 @@ async function rhel9Ami(ec2, region) {
   return FALLBACK_AMI;
 }
 
-function awsClients(accessKeyId, secretAccessKey, region) {
-  const creds = { credentials: { accessKeyId, secretAccessKey }, region };
+// sessionToken is needed for temporary keys (access key IDs starting with ASIA),
+// e.g. from the AWS access portal / IAM Identity Center
+function awsClients(accessKeyId, secretAccessKey, region, sessionToken) {
+  const credentials = { accessKeyId: (accessKeyId || '').trim(), secretAccessKey: (secretAccessKey || '').trim() };
+  if (sessionToken && sessionToken.trim()) credentials.sessionToken = sessionToken.trim();
+  const creds = { credentials, region };
   return {
     cfn: new CloudFormationClient(creds),
     ec2: new EC2Client(creds),
@@ -40,9 +44,9 @@ function awsClients(accessKeyId, secretAccessKey, region) {
 
 // GET /api/aws/resources
 router.get('/resources', async (req, res) => {
-  const { accessKeyId, secretAccessKey, region } = req.query;
+  const { accessKeyId, secretAccessKey, sessionToken, region } = req.query;
   try {
-    const { ec2 } = awsClients(accessKeyId, secretAccessKey, region);
+    const { ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
     const [vpcs, subnets, keyPairs] = await Promise.all([
       ec2.send(new DescribeVpcsCommand({})),
       ec2.send(new DescribeSubnetsCommand({})),
@@ -60,10 +64,10 @@ router.get('/resources', async (req, res) => {
 
 // POST /api/aws/deploy — App Scanner
 router.post('/deploy', async (req, res) => {
-  const { accessKeyId, secretAccessKey, region, vpcId, subnetId, keyPairName,
+  const { accessKeyId, secretAccessKey, sessionToken, region, vpcId, subnetId, keyPairName,
     instanceType, ebsSize, ssmParamName, provisioningKey, stackName } = req.body;
   try {
-    const { cfn, ssm, ec2 } = awsClients(accessKeyId, secretAccessKey, region);
+    const { cfn, ssm, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
     const imageId = await rhel9Ami(ec2, region);
 
     // Store provisioning key in SSM
@@ -95,9 +99,9 @@ router.post('/deploy', async (req, res) => {
 
 // GET /api/aws/stack-status
 router.get('/stack-status', async (req, res) => {
-  const { stackName, region, accessKeyId, secretAccessKey } = req.query;
+  const { stackName, region, accessKeyId, secretAccessKey, sessionToken } = req.query;
   try {
-    const { cfn } = awsClients(accessKeyId, secretAccessKey, region);
+    const { cfn } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
     const r = await cfn.send(new DescribeStacksCommand({ StackName: stackName }));
     const stack = r.Stacks[0];
     res.json({
@@ -112,9 +116,9 @@ router.get('/stack-status', async (req, res) => {
 
 // POST /api/aws/deploy-test-apps — DVWA + Juice Shop
 router.post('/deploy-test-apps', async (req, res) => {
-  const { accessKeyId, secretAccessKey, region, vpcId, subnetId, keyPairName, instanceType, stackName } = req.body;
+  const { accessKeyId, secretAccessKey, sessionToken, region, vpcId, subnetId, keyPairName, instanceType, stackName } = req.body;
   try {
-    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region);
+    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
     const imageId = await rhel9Ami(ec2, region);
 
     // Same script as CloudShare: Docker CE (RHEL 9's own "docker" package is podman,

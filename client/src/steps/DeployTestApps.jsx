@@ -79,6 +79,7 @@ export default function DeployTestApps({ data, update, next, back }) {
       await axios.post('/api/aws/deploy-test-apps', {
         accessKeyId: data.accessKeyId,
         secretAccessKey: data.secretAccessKey,
+        sessionToken: data.sessionToken,
         region: data.region,
         vpcId: data.vpcId,
         subnetId: data.subnetId,
@@ -98,7 +99,7 @@ export default function DeployTestApps({ data, update, next, back }) {
   const pollStatus = async () => {
     try {
       const r = await axios.get('/api/aws/stack-status', {
-        params: { stackName: 'zpa-test-apps', region: data.region, accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey }
+        params: { stackName: 'zpa-test-apps', region: data.region, accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey, sessionToken: data.sessionToken }
       })
       setStackStatus(r.data.status)
       if (r.data.status === 'CREATE_COMPLETE') {
