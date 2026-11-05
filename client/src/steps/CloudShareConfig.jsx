@@ -27,6 +27,41 @@ const REGIONS = [
   { id: 'RE6OEZs-y-mkK1mEMGwIgZiw2',  label: '🇳🇱 EU (Amsterdam)' },
 ]
 
+// Rank VM templates for the test apps VM. Higher is better; below 0 means outdated.
+// The test apps script supports apt (Ubuntu/Debian) and dnf (RHEL family).
+export function rankTemplate(name = '') {
+  const n = name.toLowerCase()
+  if (/windows/.test(n)) return -100
+  const ubuntu = n.match(/ubuntu[^0-9]*(\d{2})\.(\d{2})/)
+  if (ubuntu) {
+    const v = parseInt(ubuntu[1] + ubuntu[2], 10)        // 24.04 -> 2404
+    const lts = ubuntu[2] === '04'
+    if (v < 2004) return -10                            // 18.04 and older: out of support
+    return lts ? 500 + (v - 2000) / 10 : 300 + (v - 2000) / 10   // LTS (24.04 -> 540) beats interim releases
+  }
+  if (/ubuntu/.test(n)) {
+    if (/xenial|trusty|bionic|precise/.test(n)) return -10
+    if (/noble/.test(n)) return 540
+    if (/jammy/.test(n)) return 520
+    if (/focal/.test(n)) return 500
+    return 100                                          // Ubuntu, version unknown
+  }
+  const rhel = n.match(/(rocky|alma|rhel|red ?hat|centos stream|centos)[^0-9]*(\d+)/)
+  if (rhel) {
+    const v = parseInt(rhel[2], 10)
+    if (v >= 9) return 520
+    if (v === 8) return 480
+    return -10                                          // CentOS 7 and older
+  }
+  const debian = n.match(/debian[^0-9]*(\d+)/)
+  if (debian) {
+    const v = parseInt(debian[1], 10)
+    return v >= 12 ? 510 : v === 11 ? 470 : -10
+  }
+  if (/rocky|alma|rhel|red ?hat|debian|centos|fedora|linux/.test(n)) return 50
+  return -50                                            // not obviously Linux
+}
+
 export default function CloudShareConfig({ data, update, next, back }) {
   const saved = loadCSCreds()
 
@@ -167,10 +202,13 @@ export default function CloudShareConfig({ data, update, next, back }) {
     if (templates) return
     try {
       const r = await axios.get('/api/cloudshare/templates', { params: { apiId, apiKey, regionId: envDetail?.regionId } })
-      const list = (r.data || []).sort((a, b) => a.name.localeCompare(b.name))
+      // Best first: newest supported release, then more CPU/RAM, then name
+      const list = (r.data || []).map(t => ({ ...t, rank: rankTemplate(t.name) }))
+        .sort((a, b) => b.rank - a.rank
+          || ((b.resources?.memorySizeMB || 0) - (a.resources?.memorySizeMB || 0))
+          || a.name.localeCompare(b.name))
       setTemplates(list)
-      const pick = list.find(t => /ubuntu/i.test(t.name)) || list.find(t => LINUX_RE.test(t.name))
-      if (pick) setTemplateId(pick.id)
+      if (list[0] && list[0].rank > 0) setTemplateId(list[0].id)
     } catch (e) { setError(e.response?.data?.error || e.message); setTemplates([]) }
   }
 
@@ -209,7 +247,9 @@ export default function CloudShareConfig({ data, update, next, back }) {
   const otherVms = (envDetail?.vms || []).filter(v => v.id !== selectedVm)
   const testVmDetail = otherVms.find(v => v.id === selectedTestVm)
   const shownTemplates = (templates || []).filter(t =>
-    templateFilter ? t.name.toLowerCase().includes(templateFilter.toLowerCase()) : LINUX_RE.test(t.name))
+    templateFilter ? t.name.toLowerCase().includes(templateFilter.toLowerCase()) : t.rank > -50)
+  const bestRank = templates?.[0]?.rank ?? 0
+  const chosenTemplate = (templates || []).find(t => t.id === templateId)
   const canContinue = connected && selectedEnv && selectedVm && selectedVmDetail && !creating && !addingVm
 
   const handleContinue = () => {
@@ -487,11 +527,20 @@ export default function CloudShareConfig({ data, update, next, back }) {
                               <option value="">— Select a template ({shownTemplates.length} shown) —</option>
                               {shownTemplates.map(t => (
                                 <option key={t.id} value={t.id}>
-                                  {t.name}{t.resources ? ` — ${t.resources.cpuCount} vCPU, ${Math.round(t.resources.memorySizeMB/1024)} GB RAM` : ''}
+                                  {t.rank === bestRank && t.rank > 0 ? '★ ' : ''}{t.name}{t.resources ? ` — ${t.resources.cpuCount} vCPU, ${Math.round(t.resources.memorySizeMB/1024)} GB RAM` : ''}{t.rank < 0 ? ' (outdated)' : ''}
                                 </option>
                               ))}
                             </select>
-                            <div className="hint">Pick a current release (e.g. Ubuntu 22.04/24.04, Rocky/RHEL 9) whose VMs have internet access. 2 vCPU and 4 GB RAM is enough for both apps.</div>
+                            {chosenTemplate && chosenTemplate.rank > 0 && chosenTemplate.rank === bestRank && (
+                              <div className="hint" style={{ color: '#16a34a' }}>★ Recommended — the newest supported Linux release available to you.</div>
+                            )}
+                            {chosenTemplate && chosenTemplate.rank < 0 && (
+                              <div className="hint" style={{ color: '#dc2626' }}>This release is outdated and likely won’t install Docker cleanly. Pick a ★ template if you can.</div>
+                            )}
+                            {templates.length > 0 && bestRank <= 0 && (
+                              <div className="hint" style={{ color: '#d97706' }}>No current Linux templates found (Ubuntu 20.04+, Debian 11+, Rocky/RHEL 8+). Type in the filter box to search all templates.</div>
+                            )}
+                            <div className="hint">The VM also needs internet access to download Docker and the app images. 2 vCPU and 4 GB RAM is enough for both apps.</div>
                           </>
                         )}
                         <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
