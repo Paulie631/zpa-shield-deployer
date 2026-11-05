@@ -378,22 +378,46 @@ router.post('/vms/:vmId/check-network', async (req, res) => {
   }
 });
 
-// PUT /api/cloudshare/vms/:vmId/hardware — resize CPU / RAM / disk
+async function editHardware(apiId, apiKey, body) {
+  try {
+    return await csPut(apiId, apiKey, '/api/v3/vms/actions/editvmhardware', body);
+  } catch (e) {
+    // CloudShare's docs show both spellings of this path
+    if (e.response?.status !== 404) throw e;
+    return csPut(apiId, apiKey, '/api/v3/vms/action/editvmhardware', body);
+  }
+}
+
+// PUT /api/cloudshare/vms/:vmId/hardware — resize CPU / RAM / disk.
+// CloudShare product tiers cap VM sizes, so step down whichever resource the
+// error names until CloudShare accepts it, and report what was applied.
+const STEPS = {
+  numCpus: [16, 12, 8, 6, 4, 2],
+  memorySizeMBs: [16384, 12288, 8192, 6144, 4096],
+  diskSizeGBs: [200, 160, 120, 100, 80, 60],
+};
 router.put('/vms/:vmId/hardware', async (req, res) => {
   const { apiId, apiKey, numCpus, memorySizeMBs, diskSizeGBs } = req.body;
-  const body = { vmId: req.params.vmId, numCpus, memorySizeMBs, diskSizeGBs };
+  const want = { numCpus, memorySizeMBs, diskSizeGBs };
+  const cur = { ...want };
+  const limits = [];
   try {
-    let result;
-    try {
-      result = await csPut(apiId, apiKey, '/api/v3/vms/actions/editvmhardware', body);
-    } catch (e) {
-      // CloudShare's docs show both spellings of this path
-      if (e.response?.status !== 404) throw e;
-      result = await csPut(apiId, apiKey, '/api/v3/vms/action/editvmhardware', body);
+    for (let attempt = 0; attempt < 15; attempt++) {
+      try {
+        const result = await editHardware(apiId, apiKey, { vmId: req.params.vmId, ...cur });
+        return res.json({ ...(result || {}), applied: cur, requested: want, reduced: limits.length > 0, limits });
+      } catch (e) {
+        const msg = csError(e);
+        const key = /cpu/i.test(msg) ? 'numCpus' : /memory|ram/i.test(msg) ? 'memorySizeMBs' : /disk/i.test(msg) ? 'diskSizeGBs' : null;
+        const lower = key && STEPS[key].find(v => v < cur[key]);
+        if (!key || !lower) throw e;          // not a size limit, or nothing smaller to try
+        limits.push(msg);
+        cur[key] = lower;
+      }
     }
-    res.json(result || {});
+    throw new Error('CloudShare kept rejecting the resize');
   } catch (err) {
-    res.status(400).json({ error: csError(err) });
+    res.status(400).json({ error: csError(err), limits });
   }
 });
 

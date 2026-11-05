@@ -170,7 +170,8 @@ export default function CloudShareConfig({ data, update, next, back }) {
     setResizing(true); setAddNote(''); setError('')
     try {
       const r = await axios.put(`/api/cloudshare/vms/${selectedVm}/hardware`, { apiId, apiKey, ...SCANNER_SPEC })
-      if (r.data?.conflictsFound) setAddNote(`CloudShare reported a conflict resizing: ${r.data.conflicts}.`)
+      if (r.data?.reduced) setAddNote(`Your CloudShare plan doesn’t allow the full App Scanner size, so the VM was set to the largest it allows: ${r.data.applied.numCpus} vCPU / ${r.data.applied.memorySizeMBs / 1024} GB RAM / ${r.data.applied.diskSizeGBs} GB disk. Zscaler asks for ${SCANNER_SPEC.numCpus} vCPU / ${SCANNER_SPEC.memorySizeMBs / 1024} GB — the scanner may run slowly or refuse to start.`)
+      if (r.data?.conflictsFound) setAddNote(n => (n ? n + ' ' : '') + `CloudShare reported a conflict resizing: ${r.data.conflicts}.`)
       const d = await axios.get(`/api/cloudshare/envs/${selectedEnv}`, { params: { apiId, apiKey } })
       setEnvDetail(d.data)
     } catch (e) { setError('Resize failed: ' + (e.response?.data?.error || e.message)) }

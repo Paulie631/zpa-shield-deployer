@@ -58,7 +58,8 @@ export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmI
               setStatus(`🔧 Resizing ${added.name} to ${resize.numCpus} vCPU, ${resize.memorySizeMBs / 1024} GB RAM, ${resize.diskSizeGBs} GB disk...`)
               try {
                 const r = await axios.put(`/api/cloudshare/vms/${added.id}/hardware`, { apiId, apiKey, ...resize })
-                if (r.data?.conflictsFound) note = `CloudShare reported a conflict resizing: ${r.data.conflicts}. Check the VM size in CloudShare.`
+                if (r.data?.reduced) note = `Your CloudShare plan doesn’t allow the full App Scanner size, so ${added.name} was set to the largest it allows: ${r.data.applied.numCpus} vCPU / ${r.data.applied.memorySizeMBs / 1024} GB RAM / ${r.data.applied.diskSizeGBs} GB disk.`
+                if (r.data?.conflictsFound) note = (note ? note + ' ' : '') + `CloudShare reported a conflict resizing: ${r.data.conflicts}.`
               } catch (e) { note = 'Resize failed: ' + (e.response?.data?.error || e.message) + '. Resize the VM in CloudShare before installing the scanner.' }
             }
             const fresh = await axios.get(`/api/cloudshare/envs/${envId}`, { params: { apiId, apiKey } }).catch(() => detail)
