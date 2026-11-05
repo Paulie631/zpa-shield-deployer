@@ -222,6 +222,16 @@ router.get('/connector-groups', async (req, res) => {
   }
 });
 
+// GET /api/zpa/app-segments — list app segments (for the scan step)
+router.get('/app-segments', async (req, res) => {
+  const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
+  try {
+    const { headers, mgmtBase } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId });
+    const r = await axios.get(mgmtBase + '/application', { headers, params: { pagesize: 500 }, timeout: 15000 });
+    res.json(r.data.list || r.data.applications || (Array.isArray(r.data) ? r.data : []));
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
+});
+
 router.get('/server-groups', async (req, res) => {
   const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
   try {

@@ -1,18 +1,19 @@
 import React, { useState } from 'react'
+import { zpaPortalBase } from '../lib/zpa'
 
-const STEPS = (tenantUrl) => [
+const STEPS = (base) => [
   {
     id: 'version-profile',
     title: 'Assign AppShield 1.0 Scanner Version Profile',
     desc: 'In the ZPA Admin Portal, edit your App Connector Group → Version Profile Configuration → set to Custom → select "AppShield 1.0 scanner profile". Ensure it is provisioned via a SET-OPS ticket.',
-    link: `https://${tenantUrl}/app#appConnectorGroups`,
+    link: `${base}/app#appConnectorGroups`,
     linkLabel: '→ Open App Connector Groups'
   },
   {
     id: 'enable-scanning',
     title: 'Enable Application Shield Scanning on the Connector',
     desc: 'Go to App Connectors, edit your newly deployed App Scanner connector, and set "Application Shield Scanning" to Enabled. Do this AFTER assigning the version profile.',
-    link: `https://${tenantUrl}/app#appConnectors`,
+    link: `${base}/app#appConnectors`,
     linkLabel: '→ Open App Connectors'
   },
   {
@@ -25,13 +26,13 @@ const STEPS = (tenantUrl) => [
     id: 'verify-healthy',
     title: 'Verify Connector Shows Healthy',
     desc: 'Return to App Connectors and confirm your App Scanner shows as Connected and Healthy (green). This may take 2–3 minutes after reboot.',
-    link: `https://${tenantUrl}/app#appConnectors`,
+    link: `${base}/app#appConnectors`,
     linkLabel: '→ Check App Connectors Status'
   }
 ]
 
 export default function PortalSteps({ data, update, next, back }) {
-  const steps = STEPS(data.tenantUrl || 'your-tenant.private.zscaler.com')
+  const steps = STEPS(zpaPortalBase(data))
   const [checked, setChecked] = useState(data.portalStepsChecked || {})
 
   const toggle = (id) => {

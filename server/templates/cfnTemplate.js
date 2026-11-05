@@ -1,4 +1,4 @@
-function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSize, script, ssmParamName }) {
+function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSize, script, ssmParamName, imageId }) {
   const userDataB64 = Buffer.from(script).toString('base64');
 
   return JSON.stringify({
@@ -42,8 +42,7 @@ function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSi
       ZPAScannerInstance: {
         Type: 'AWS::EC2::Instance',
         Properties: {
-          // RHEL 9 us-east-1 — update this AMI ID for your region
-          ImageId: 'ami-0fe630eb857a6ec83',
+          ImageId: imageId || 'ami-0fe630eb857a6ec83',
           InstanceType: instanceType || 'c5.4xlarge',
           KeyName: keyPairName,
           SubnetId: subnetId,

@@ -1,8 +1,9 @@
 import React from 'react'
+import { zpaPortalBase } from '../lib/zpa'
 
 export default function Done({ data, goTo }) {
   const isAWS = data.target === 'aws'
-  const tenantBase = `https://${data.tenantUrl}`
+  const tenantBase = zpaPortalBase(data)
   const segments = (data.appSegments || []).filter(s => (data.selectedSegmentIds || []).includes(s.id))
 
   return (

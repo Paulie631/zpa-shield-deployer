@@ -110,7 +110,8 @@ API Routes:
 
 ## Security
 
-- **Credentials are never stored** — AWS keys, ZPA API keys, and provisioning keys are passed per-request only and never written to disk or logs
+- **Credentials are never stored server-side** — they're passed per request and never written to disk or logs. The browser remembers ZPA and CloudShare credentials in localStorage for convenience (use “Clear saved” to remove them)
+- The local API only accepts requests from the wizard itself (`localhost:3000`), and the updater only installs this repo's own GitHub release zips
 - AWS provisioning key is stored in **SSM Parameter Store as a SecureString**
 - The App Scanner EC2 security group allows **outbound 443 only** — no inbound rules
 - Test app EC2 instance has **no inbound security group rules** — access is via ZPA only
@@ -141,7 +142,7 @@ The wizard can deploy two intentionally vulnerable apps for scanning:
 - Security group (outbound only)
 - DVWA + Juice Shop via Docker (auto-start on boot)
 
-> ⚠️ **AMI Note:** Default AMI (`ami-0fe630eb857a6ec83`) is RHEL 9 for `us-east-1`. Update for other regions: [Red Hat AMI finder](https://access.redhat.com/solutions/15356)
+> ℹ️ **AMI:** the wizard looks up the latest official RHEL 9 AMI (Red Hat's AWS account) in your chosen region, so the AWS keys need `ec2:DescribeImages`.
 
 ---
 

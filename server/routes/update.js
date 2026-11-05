@@ -61,6 +61,11 @@ router.get('/check', async (req, res) => {
 router.post('/apply', async (req, res) => {
   const { zipUrl, latestVersion } = req.body;
   if (!zipUrl) return res.status(400).json({ error: 'No zip URL provided' });
+  // Only install this repo's own release zips; the version ends up in file paths and shell commands
+  if (!/^\d+\.\d+\.\d+$/.test(String(latestVersion || ''))) return res.status(400).json({ error: 'Invalid version' });
+  if (!String(zipUrl).startsWith(`https://github.com/${REPO}/releases/download/`)) {
+    return res.status(400).json({ error: 'Updates can only be downloaded from this app\'s GitHub releases' });
+  }
 
   // Send immediate response — update happens async
   res.json({ status: 'updating', message: 'Update started. App will restart in ~30 seconds.' });

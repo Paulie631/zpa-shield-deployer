@@ -1,10 +1,33 @@
 const express = require('express');
 const router = express.Router();
 const { CloudFormationClient, CreateStackCommand, DescribeStacksCommand } = require('@aws-sdk/client-cloudformation');
-const { EC2Client, DescribeVpcsCommand, DescribeSubnetsCommand, DescribeKeyPairsCommand } = require('@aws-sdk/client-ec2');
+const { EC2Client, DescribeVpcsCommand, DescribeSubnetsCommand, DescribeKeyPairsCommand, DescribeImagesCommand } = require('@aws-sdk/client-ec2');
 const { SSMClient, PutParameterCommand } = require('@aws-sdk/client-ssm');
 const { generateCfnTemplate } = require('../templates/cfnTemplate');
 const { generateSetupScript } = require('../templates/setupScript');
+const { generateTestAppsScript } = require('../templates/testAppsScript');
+
+// Latest official RHEL 9 x86_64 AMI in this region (Red Hat's AWS account), so stacks
+// work outside us-east-1. Falls back to the known us-east-1 image if the lookup fails.
+const RED_HAT_OWNER = '309956199498';
+const FALLBACK_AMI = 'ami-0fe630eb857a6ec83';
+async function rhel9Ami(ec2, region) {
+  try {
+    const r = await ec2.send(new DescribeImagesCommand({
+      Owners: [RED_HAT_OWNER],
+      Filters: [
+        { Name: 'name', Values: ['RHEL-9.*_HVM-*-x86_64-*'] },
+        { Name: 'architecture', Values: ['x86_64'] },
+        { Name: 'state', Values: ['available'] },
+      ],
+    }));
+    const imgs = (r.Images || []).filter(i => !/BETA|beta/.test(i.Name || ''))
+      .sort((a, b) => String(b.CreationDate).localeCompare(String(a.CreationDate)));
+    if (imgs[0]) return imgs[0].ImageId;
+  } catch (e) { console.warn('[rhel9Ami] lookup failed:', e.message); }
+  if (region !== 'us-east-1') throw new Error(`Could not find a RHEL 9 AMI in ${region}. Check the AWS keys can call ec2:DescribeImages.`);
+  return FALLBACK_AMI;
+}
 
 function awsClients(accessKeyId, secretAccessKey, region) {
   const creds = { credentials: { accessKeyId, secretAccessKey }, region };
@@ -40,7 +63,8 @@ router.post('/deploy', async (req, res) => {
   const { accessKeyId, secretAccessKey, region, vpcId, subnetId, keyPairName,
     instanceType, ebsSize, ssmParamName, provisioningKey, stackName } = req.body;
   try {
-    const { cfn, ssm } = awsClients(accessKeyId, secretAccessKey, region);
+    const { cfn, ssm, ec2 } = awsClients(accessKeyId, secretAccessKey, region);
+    const imageId = await rhel9Ami(ec2, region);
 
     // Store provisioning key in SSM
     await ssm.send(new PutParameterCommand({
@@ -51,7 +75,7 @@ router.post('/deploy', async (req, res) => {
     }));
 
     const script = generateSetupScript({ ssmParamName: ssmParamName || '/zpa/provisioning-key', provisioningKey, region });
-    const template = generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSize, script, ssmParamName: ssmParamName || '/zpa/provisioning-key' });
+    const template = generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSize, script, imageId, ssmParamName: ssmParamName || '/zpa/provisioning-key' });
 
     const finalStackName = stackName || 'zpa-app-scanner';
     await cfn.send(new CreateStackCommand({
@@ -90,17 +114,12 @@ router.get('/stack-status', async (req, res) => {
 router.post('/deploy-test-apps', async (req, res) => {
   const { accessKeyId, secretAccessKey, region, vpcId, subnetId, keyPairName, instanceType, stackName } = req.body;
   try {
-    const { cfn } = awsClients(accessKeyId, secretAccessKey, region);
+    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region);
+    const imageId = await rhel9Ami(ec2, region);
 
-    const userDataScript = Buffer.from(`#!/bin/bash
-set -euo pipefail
-dnf install -y docker || yum install -y docker
-systemctl start docker
-systemctl enable docker
-docker run -d --name dvwa --restart always -p 80:80 vulnerables/web-dvwa
-docker run -d --name juiceshop --restart always -p 3000:3000 bkimminich/juice-shop
-echo "Test apps deployed" > /tmp/testapps-done
-`).toString('base64');
+    // Same script as CloudShare: Docker CE (RHEL 9's own "docker" package is podman,
+    // which has no docker service) + DVWA + Juice Shop
+    const userDataScript = Buffer.from(generateTestAppsScript()).toString('base64');
 
     const template = JSON.stringify({
       AWSTemplateFormatVersion: '2010-09-09',
@@ -117,8 +136,7 @@ echo "Test apps deployed" > /tmp/testapps-done
         TestAppsInstance: {
           Type: 'AWS::EC2::Instance',
           Properties: {
-            // RHEL 9 us-east-1 — update AMI per region: https://access.redhat.com/solutions/15356
-            ImageId: 'ami-0fe630eb857a6ec83',
+            ImageId: imageId,
             InstanceType: instanceType || 't3.medium',
             KeyName: keyPairName,
             SubnetId: subnetId,

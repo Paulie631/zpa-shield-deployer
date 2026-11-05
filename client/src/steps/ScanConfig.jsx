@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import axios from 'axios'
+import { zpaAuth, zpaPortalBase } from '../lib/zpa'
 
 const PROBING = [
   {
@@ -29,7 +30,23 @@ const PROBING = [
 ]
 
 export default function ScanConfig({ data, update, next, back }) {
-  const segments = data.appSegments || []
+  const [segments, setSegments] = useState(data.appSegments || [])
+  const [loadingSegs, setLoadingSegs] = useState(false)
+  const [segError, setSegError] = useState('')
+  const [apiFailed, setApiFailed] = useState(false)
+
+  // Load segments live: the credentials step can't list them in OneAPI mode (no customer ID yet),
+  // and segments may have been created since.
+  const loadSegments = async () => {
+    setLoadingSegs(true); setSegError('')
+    try {
+      const r = await axios.get('/api/zpa/app-segments', { params: zpaAuth(data) })
+      setSegments(r.data || [])
+      update({ appSegments: r.data || [] })
+    } catch (e) { setSegError(e.response?.data?.error || e.message) }
+    finally { setLoadingSegs(false) }
+  }
+  useEffect(() => { loadSegments() }, [])
   const [selectedSegments, setSelectedSegments] = useState(data.selectedSegmentIds || [])
   const [probingLevel, setProbingLevel] = useState(data.probingLevel || 'MEDIUM')
   const [frequency, setFrequency] = useState(data.frequency || 'WEEKLY')
@@ -49,10 +66,7 @@ export default function ScanConfig({ data, update, next, back }) {
     setError('')
     try {
       const res = await axios.post('/api/zpa/scan', {
-        tenantUrl: data.tenantUrl,
-        apiKey: data.apiKey,
-        clientId: data.clientId,
-        clientSecret: data.clientSecret,
+        ...zpaAuth(data),
         appSegmentIds: selectedSegments,
         probingLevel,
         frequency,
@@ -64,6 +78,7 @@ export default function ScanConfig({ data, update, next, back }) {
       next()
     } catch (err) {
       setError(err.response?.data?.error || err.message)
+      setApiFailed(true)
     } finally {
       setLoading(false)
     }
@@ -81,8 +96,15 @@ export default function ScanConfig({ data, update, next, back }) {
 
       <div className="form-group">
         <label>App Segments to Scan <span style={{ color: '#9ca3af', fontWeight: 400 }}>({selectedSegments.length} selected)</span></label>
-        {segments.length === 0 ? (
-          <div className="alert alert-warning">⚠️ No app segments found in your ZPA tenant. Create app segments first, then return to this step.</div>
+        {loadingSegs ? (
+          <div className="hint">🔄 Loading app segments from ZPA...</div>
+        ) : segError ? (
+          <div className="alert alert-error"><span>⚠️ Couldn’t load app segments: {segError} <button onClick={loadSegments} style={{ marginLeft: 8, fontSize: 12 }}>↻ Retry</button></span></div>
+        ) : segments.length === 0 ? (
+          <div className="alert alert-warning">
+            <span>⚠️ No app segments found in your ZPA tenant.{data.testAppsPrivateIp ? <> Create two for the test apps at <strong>{data.testAppsPrivateIp}</strong> — DVWA on port 80 and Juice Shop on port 3000 — </> : ' Create them '}
+            in the <a href={`${zpaPortalBase(data)}`} target="_blank" rel="noreferrer">ZPA Admin Portal</a>, then <button onClick={loadSegments} style={{ fontSize: 12 }}>↻ Reload</button></span>
+          </div>
         ) : (
           <div className="multi-select">
             {segments.map(seg => (
@@ -130,10 +152,25 @@ export default function ScanConfig({ data, update, next, back }) {
         </div>
       </div>
 
-      {error && <div className="alert alert-error">⚠️ {error}</div>}
+      {error && (
+        <div className="alert alert-error" style={{ display: 'block' }}>
+          ⚠️ {error}
+          {apiFailed && (
+            <div style={{ marginTop: 6 }}>
+              Zscaler doesn’t document an API for creating App Shield scans, so this call may not be supported on your tenant.
+              Create the scan in the <a href={zpaPortalBase(data)} target="_blank" rel="noreferrer">ZPA Admin Portal</a> instead, then continue.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="btn-row">
         <button className="btn btn-secondary" onClick={back}>← Back</button>
+        {apiFailed && (
+          <button className="btn btn-secondary" onClick={() => { update({ selectedSegmentIds: selectedSegments, probingLevel, frequency, startTime, scanName, scanCreatedManually: true }); next() }}>
+            I’ll create it in the portal — Continue →
+          </button>
+        )}
         <button className="btn btn-primary" onClick={createScan}
           disabled={loading || selectedSegments.length === 0 || !scanName}>
           {loading ? <><span className="spinner" /> Creating scan...</> : '✅ Create Scan & Continue →'}
