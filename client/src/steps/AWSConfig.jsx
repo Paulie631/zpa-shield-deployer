@@ -45,7 +45,10 @@ export default function AWSConfig({ data, update, next, back }) {
   const authParams = () => credMode === 'profile'
     ? { awsProfile: form.awsProfile, region: form.region }
     : { accessKeyId: form.accessKeyId, secretAccessKey: form.secretAccessKey, sessionToken: form.sessionToken, region: form.region }
-  const haveCreds = credMode === 'profile' ? !!form.awsProfile : (form.accessKeyId && form.secretAccessKey && (!/^ASIA/.test(form.accessKeyId.trim()) || form.sessionToken))
+  const [awsSaved, setAwsSaved] = useState(null)
+  useEffect(() => { axios.get('/api/vault').then(r => setAwsSaved(r.data.aws || null)).catch(() => {}) }, [])
+  const savedKeyMatches = awsSaved?.stored && awsSaved.accessKeyId && awsSaved.accessKeyId === form.accessKeyId.trim()
+  const haveCreds = credMode === 'profile' ? !!form.awsProfile : (form.accessKeyId && (form.secretAccessKey || savedKeyMatches) && (!/^ASIA/.test(form.accessKeyId.trim()) || form.sessionToken || savedKeyMatches))
 
   const checkWhoami = async () => {
     setWhoami({ state: 'running' })
@@ -74,10 +77,13 @@ export default function AWSConfig({ data, update, next, back }) {
 
   const isTempKey = /^ASIA/.test((form.accessKeyId || '').trim())
   const canContinue = haveCreds && form.region && form.vpcId && form.subnetId && form.keyPairName
-  // What the later steps get: only the chosen credential source
-  const toSave = () => credMode === 'profile'
-    ? { ...form, accessKeyId: '', secretAccessKey: '', sessionToken: '' }
-    : { ...form, awsProfile: '' }
+  // What the later steps get: only the chosen credential source. Pasted secrets go to the
+  // backend's owner-only secrets file and are filled in server-side; the browser keeps the key ID only.
+  const toSave = () => {
+    if (credMode === 'profile') return { ...form, accessKeyId: '', secretAccessKey: '', sessionToken: '' }
+    axios.put('/api/vault/aws', { accessKeyId: form.accessKeyId, secretAccessKey: form.secretAccessKey, sessionToken: form.sessionToken }).catch(() => {})
+    return { ...form, awsProfile: '', secretAccessKey: '', sessionToken: '' }
+  }
 
   return (
     <div className="card">
@@ -132,7 +138,7 @@ aws sso login --profile zscaler`}</pre>
         </div>
         <div className="form-group">
           <label>AWS Secret Access Key</label>
-          <input type="password" placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfi..." value={form.secretAccessKey}
+          <input type="password" placeholder={savedKeyMatches ? '•••••••• saved on this Mac for this key ID' : 'wJalrXUtnFEMI/K7MDENG/bPxRfi...'} value={form.secretAccessKey}
             onChange={e => set('secretAccessKey', e.target.value)} />
         </div>
       </div>
@@ -141,7 +147,7 @@ aws sso login --profile zscaler`}</pre>
         <label>AWS Session Token {isTempKey ? <span style={{ color: '#dc2626' }}>*</span> : <span style={{ color: '#9ca3af', fontWeight: 400 }}>(only for temporary keys)</span>}</label>
         <input type="password" placeholder="IQoJb3JpZ2luX2VjE... (from the AWS access portal)" value={form.sessionToken}
           onChange={e => set('sessionToken', e.target.value)} />
-        {isTempKey && !form.sessionToken && (
+        {isTempKey && !form.sessionToken && !savedKeyMatches && (
           <div className="hint" style={{ color: '#dc2626' }}>
             This is a temporary key (starts with ASIA), so AWS also needs its session token. In the AWS access portal, open “Access keys” for your account and copy <strong>AWS_SESSION_TOKEN</strong> as well.
           </div>

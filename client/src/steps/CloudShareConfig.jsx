@@ -3,8 +3,8 @@ import axios from 'axios'
 import NetworkCheck from '../components/NetworkCheck'
 import AddVmPanel from '../components/AddVmPanel'
 import { rankTemplate, rankScannerTemplate, describeScannerTemplate, SCANNER_SPEC } from '../lib/templates'
+import { loadCSCreds, saveCSCreds, csSecretSaved } from '../lib/cloudshare'
 
-const CS_STORAGE_KEY = 'zpa-cs-creds'
 const PROJECT_ID     = 'PRotcbPOeZ9_Dd4lJww1o-6A2'
 const BP_APP_SCANNER = 'BPps02yDq1W9eCQwn3xyjMgQ2'
 const BP_NAME        = 'App Connector Base'
@@ -13,13 +13,6 @@ const POLICY_ID      = 'POEsi2O9SdO2D3GM-EZWuD6g2'
 // Exact CloudShare template names to prefer (empty = let the wizard rank them)
 const PREFERRED_TESTAPPS_TEMPLATE = ''
 const PREFERRED_SCANNER_TEMPLATE  = ''
-
-function loadCSCreds() {
-  try { return JSON.parse(localStorage.getItem(CS_STORAGE_KEY) || '{}') } catch { return {} }
-}
-function saveCSCreds(obj) {
-  try { localStorage.setItem(CS_STORAGE_KEY, JSON.stringify(obj)) } catch {}
-}
 
 const STATUS_COLOR = {
   'Ready': '#16a34a', 'Running': '#16a34a',
@@ -65,12 +58,13 @@ export default function CloudShareConfig({ data, update, next, back }) {
   const [createStatus, setCreateStatus] = useState('')
   const pollRef = useRef(null)
 
+  // The API key lives in the backend's secrets file once validated; blank = use the saved one
+  const [keySaved, setKeySaved] = useState(false)
   useEffect(() => {
-    if (apiId || apiKey) saveCSCreds({ apiId, apiKey })
-  }, [apiId, apiKey])
-
-  useEffect(() => {
-    if (apiId && apiKey && !connected) connect()
+    csSecretSaved().then(saved => {
+      setKeySaved(saved)
+      if (apiId && (apiKey || saved) && !connected) connect()
+    })
   }, [])
 
   // Cleanup poll on unmount
@@ -80,6 +74,8 @@ export default function CloudShareConfig({ data, update, next, back }) {
     setLoading(true); setError('')
     try {
       const res = await axios.get('/api/cloudshare/validate', { params: { apiId, apiKey } })
+      saveCSCreds({ apiId, apiKey })          // key -> backend secrets file, ID -> browser
+      if (apiKey) { setKeySaved(true); setApiKey('') }
       setEnvironments(res.data.environments || [])
       setConnected(true)
       if (res.data.environments?.length === 1) setSelectedEnv(res.data.environments[0].id)
@@ -189,7 +185,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
   const handleContinue = () => {
     update({
       csApiId: apiId,
-      csApiKey: apiKey,
+      csApiKey: '',   // filled server-side from the secrets file
       csEnvId: selectedEnv,
       csEnvName: envDetail?.name,
       csVmId: selectedVm,
@@ -239,20 +235,20 @@ export default function CloudShareConfig({ data, update, next, back }) {
           <div className="form-group">
             <label>API Key <span className="label-required">*</span></label>
             <div className="input-with-reveal">
-              <input type={showKey ? 'text' : 'password'} placeholder="Your CloudShare API Key"
+              <input type={showKey ? 'text' : 'password'} placeholder={keySaved ? '•••••••• saved on this Mac — paste a new one to replace it' : 'Your CloudShare API Key'}
                 value={apiKey} onChange={e => setApiKey(e.target.value.trim())} />
               <button className="reveal-btn" onClick={() => setShowKey(s => !s)}>
                 {showKey ? '🙈 Hide' : '👁 Show'}
               </button>
             </div>
-            <div className="hint">Saved locally in your browser — never sent to any server except CloudShare.</div>
+            <div className="hint">Sent only to CloudShare. The key is kept in an owner-only file on this Mac (~/.zpa-shield), not in the browser.</div>
           </div>
 
           {error && <div className="alert alert-error">⚠️ {error}</div>}
 
           <div className="btn-row">
             <button className="btn btn-secondary" onClick={back}>← Back</button>
-            <button className="btn btn-primary" onClick={connect} disabled={!apiId || !apiKey || loading}>
+            <button className="btn btn-primary" onClick={connect} disabled={!apiId || !(apiKey || keySaved) || loading}>
               {loading ? '🔄 Connecting...' : '🔌 Connect to CloudShare →'}
             </button>
           </div>

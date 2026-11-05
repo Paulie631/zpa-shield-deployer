@@ -5,9 +5,9 @@ const fs=require('fs');const OUT=process.argv[2]||require('path').join(__dirname
 async function start(b){const p=await b.newPage({viewport:{width:1100,height:1400}});const errs=[];p.on('pageerror',e=>errs.push(e.message));
  await p.goto('http://localhost:3000');await p.evaluate(()=>localStorage.clear());await p.reload();
  await p.getByText('OneAPI',{exact:false}).first().click();
- await p.getByPlaceholder('yourcompany').fill('paulaiuto');await p.getByPlaceholder('Zidentity Client ID').fill('c');await p.getByPlaceholder('Zidentity Client Secret').fill('s');
+ await p.getByPlaceholder('yourcompany').fill('paulaiuto');await p.getByPlaceholder('Zidentity Client ID').fill('c');await p.locator('.input-with-reveal input').first().fill('s');
  await p.locator('button.btn-primary').last().click();return {p,errs};}
-const h2=p=>p.locator('h2').first().innerText();
+let LAST;const h2=async p=>{LAST=p;try{return await p.locator('h2').first().innerText({timeout:15000})}catch(e){await p.screenshot({path:OUT+'/fail.png',fullPage:true}).catch(()=>{});console.log('PAGE TEXT:',(await p.locator('body').innerText().catch(()=>'')).slice(0,800));throw e}};
 async function zpaSetup(p){
  await p.locator('input[placeholder="e.g. 216196257331281920"]').fill('72064686102675456');await p.locator('h2').first().click();await p.waitForTimeout(1500);
  await p.getByText('Create new connector group').click();await p.getByRole('button',{name:/Create Group/}).click();await p.waitForTimeout(1500);

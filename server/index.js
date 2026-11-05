@@ -14,6 +14,11 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '2mb' }));
 
+// Secrets stay on this machine: blank secret fields are filled from ~/.zpa-shield/secrets.json
+const { fillFromVault } = require('./lib/vault');
+app.use('/api/vault', require('./routes/vault'));
+app.use(fillFromVault);
+
 app.use('/api/zpa', require('./routes/zpa'));
 app.use('/api/aws', require('./routes/aws'));
 app.use('/api/cloudshare', require('./routes/cloudshare'));

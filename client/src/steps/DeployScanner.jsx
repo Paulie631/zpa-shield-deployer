@@ -30,7 +30,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
   const pollRef = useRef(null)
 
   // CloudShare: run the script on the VM through the CloudShare API
-  const canRunRemote = isCloudShare && data.csVmId && data.csApiId && data.csApiKey
+  const canRunRemote = isCloudShare && data.csVmId && data.csApiId
   const [runState, setRunState] = useState('idle') // idle | starting | running | done | failed
   const [runLog, setRunLog]     = useState('')
   const [runError, setRunError] = useState('')

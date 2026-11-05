@@ -62,6 +62,20 @@ export default function ScanConfig({ data, update, next, back }) {
   const testIp = data.testAppsPrivateIp
   const testSegsExist = segments.some(s => (s.domainNames || []).includes(testIp))
 
+  const [selectedSegments, setSelectedSegments] = useState(data.selectedSegmentIds || [])
+  const [probingLevel, setProbingLevel] = useState(data.probingLevel || 'MEDIUM')
+  const [frequency, setFrequency] = useState(data.frequency || 'WEEKLY')
+  const [startTime, setStartTime] = useState(data.startTime || '02:00')
+  const [scanName, setScanName] = useState(data.scanName || 'Shield Scan')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const toggleSegment = (id) => {
+    setSelectedSegments(prev =>
+      prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
+    )
+  }
+
   const createScan = async () => {
     setLoading(true)
     setError('')

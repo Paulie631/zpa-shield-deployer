@@ -20,7 +20,7 @@ export default function DeployTestApps({ data, update, next, back }) {
   const isAWS = data.target === 'aws'
 
   // CloudShare: deploy onto the second VM through the CloudShare API
-  const canRunRemote = !isAWS && data.csTestVmId && data.csApiId && data.csApiKey
+  const canRunRemote = !isAWS && data.csTestVmId && data.csApiId
   const [runState, setRunState] = useState(data.testAppsLaunched && !isAWS ? 'done' : 'idle') // idle | starting | running | done | failed
   const [runLog, setRunLog]     = useState('')
   const [runError, setRunError] = useState('')

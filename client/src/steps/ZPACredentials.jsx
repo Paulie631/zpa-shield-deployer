@@ -74,18 +74,27 @@ export default function ZPACredentials({ data, update, next }) {
   const guide = GUIDES[authMode]
   const isOneApi = authMode === 'oneapi'
 
-  // Save to localStorage whenever any credential field changes
+  // Non-secret fields are remembered in the browser; secrets (client secret / API key) are kept
+  // by the backend in an owner-only file on this machine and filled in server-side when blank.
+  const [vault, setVault] = useState(null)   // { stored, secrets: [...] } for zpa
   React.useEffect(() => {
-    saveCreds({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain })
-  }, [authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain])
+    axios.get('/api/vault').then(r => setVault(r.data.zpa || { stored: false, secrets: [] })).catch(() => setVault({ stored: false, secrets: [] }))
+  }, [])
+  const secretSaved = (name) => !!vault?.secrets?.includes(name)
+  React.useEffect(() => {
+    saveCreds({ authMode, tenantUrl, clientId, cloudEnv, vanityDomain })
+  }, [authMode, tenantUrl, clientId, cloudEnv, vanityDomain])
 
-  const clearSaved = () => {
+  const clearSaved = async () => {
     localStorage.removeItem(STORAGE_KEY)
+    try { await axios.delete('/api/vault/zpa') } catch {}
+    setVault({ stored: false, secrets: [] })
     setTenantUrl(''); setApiKey(''); setClientId(''); setClientSecret(''); setVanityDomain('')
   }
 
-  const canSubmit = (isOneApi ? (clientId && clientSecret && vanityDomain) : tenantUrl) &&
-    (authMode === 'apikey' ? apiKey : clientId && clientSecret)
+  const haveSecret = authMode === 'apikey' ? (apiKey || secretSaved('apiKey')) : (clientSecret || secretSaved('clientSecret'))
+  const canSubmit = (isOneApi ? (clientId && haveSecret && vanityDomain) : tenantUrl) &&
+    (authMode === 'apikey' ? haveSecret : clientId && haveSecret)
 
   const validate = async () => {
     setLoading(true)
@@ -100,14 +109,21 @@ export default function ZPACredentials({ data, update, next }) {
 
       const res = await axios.get('/api/zpa/validate', { params })
 
+      // Validated: keep the secrets on this machine, out of the browser
+      await axios.put('/api/vault/zpa', {
+        authMode, tenantUrl: isOneApi ? '' : tenantUrl, cloudEnv, vanityDomain, clientId,
+        ...(authMode === 'apikey' ? (apiKey ? { apiKey } : {}) : (clientSecret ? { clientSecret } : {})),
+      }).catch(() => {})
+      setApiKey(''); setClientSecret('')
+
       update({
         authMode,
         tenantUrl: isOneApi ? null : tenantUrl,
         cloudEnv: isOneApi ? cloudEnv : null,
         vanityDomain: isOneApi ? vanityDomain : null,
-        apiKey: authMode === 'apikey' ? apiKey : undefined,
+        apiKey: undefined,
         clientId: authMode !== 'apikey' ? clientId : undefined,
-        clientSecret: authMode !== 'apikey' ? clientSecret : undefined,
+        clientSecret: undefined,
         connectorGroups: res.data.connectorGroups,
         appSegments: res.data.appSegments,
         apiBase: res.data.base
@@ -138,10 +154,10 @@ export default function ZPACredentials({ data, update, next }) {
         Enter your ZPA tenant details. We'll verify the connection and load your App Connector groups and app segments.
       </p>
 
-      <div className="disclaimer">🔒 Credentials are saved locally in your browser only — never sent to any server except ZPA.</div>
-      {Object.keys(loadSaved()).length > 0 && (
+      <div className="disclaimer">🔒 Credentials go only to Zscaler. The secret is kept in an owner-only file on this Mac (~/.zpa-shield), never in the browser.</div>
+      {(Object.keys(loadSaved()).length > 0 || vault?.stored) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '8px 0', fontSize: '13px', color: '#16a34a' }}>
-          <span>✓ Credentials remembered from last session</span>
+          <span>✓ Credentials remembered from last session{vault?.stored ? ' (secret saved on this Mac)' : ''}</span>
           <button
             onClick={clearSaved}
             style={{ fontSize: '12px', padding: '2px 8px', background: 'none', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', color: '#64748b' }}
@@ -251,7 +267,7 @@ export default function ZPACredentials({ data, update, next }) {
           <div className="input-with-reveal">
             <input
               type={showApiKey ? 'text' : 'password'}
-              placeholder="Paste your API key here"
+              placeholder={secretSaved('apiKey') ? '•••••••• saved on this Mac — paste a new one to replace it' : 'Paste your API key here'}
               value={apiKey}
               onChange={e => { setApiKey(e.target.value); setError('') }}
               autoComplete="off" spellCheck={false}
@@ -278,7 +294,7 @@ export default function ZPACredentials({ data, update, next }) {
             <div className="input-with-reveal">
               <input
                 type={showSecret ? 'text' : 'password'}
-                placeholder={isOneApi ? 'Zidentity Client Secret' : 'OAuth Client Secret'}
+                placeholder={secretSaved('clientSecret') ? '•••••••• saved on this Mac — paste a new one to replace it' : (isOneApi ? 'Zidentity Client Secret' : 'OAuth Client Secret')}
                 value={clientSecret}
                 onChange={e => { setClientSecret(e.target.value); setError('') }}
                 autoComplete="off" spellCheck={false}

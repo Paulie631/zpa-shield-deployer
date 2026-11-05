@@ -112,7 +112,7 @@ API Routes:
 
 ## Security
 
-- **Credentials are never stored server-side** — they're passed per request and never written to disk or logs. The browser remembers ZPA and CloudShare credentials in localStorage for convenience (use “Clear saved” to remove them)
+- **Secrets never sit in the browser.** ZPA client secrets / API keys, the CloudShare API key and pasted AWS keys are kept by the local backend in `~/.zpa-shield/secrets.json` (owner-only, mode 600) and filled into requests server-side. Non-secret fields (IDs, tenant, region) are remembered in the browser. “Clear saved” removes both. With an AWS CLI profile, no AWS secret is stored by the wizard at all
 - The local API only accepts requests from the wizard itself (`localhost:3000`), and the updater only installs this repo's own GitHub release zips
 - AWS provisioning key is stored in **SSM Parameter Store as a SecureString**
 - The App Scanner EC2 security group allows **outbound 443 only** — no inbound rules

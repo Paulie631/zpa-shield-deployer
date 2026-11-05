@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import { zpaAuth, zpaPortalBase } from '../lib/zpa'
-import { loadCSCreds, saveCSCreds, PROJECT_ID, POLICY_ID, REGION_MIAMI, looksLikeZccBlueprint } from '../lib/cloudshare'
+import { loadCSCreds, saveCSCreds, csSecretSaved, PROJECT_ID, POLICY_ID, REGION_MIAMI, looksLikeZccBlueprint } from '../lib/cloudshare'
 
 // Prove the test apps are reachable through ZPA before any scanner work:
 //   A. ZPA-side checks (connector online, segments, access rule) via the ZPA API
@@ -27,7 +27,8 @@ export default function VerifyAccess({ data, update, next, back }) {
   // ── B. Test client on CloudShare
   const saved = loadCSCreds()
   const [apiId, setApiId] = useState(data.csApiId || saved.apiId || '')
-  const [apiKey, setApiKey] = useState(data.csApiKey || saved.apiKey || '')
+  const [apiKey, setApiKey] = useState('')
+  const [keySaved, setKeySaved] = useState(false)
   const [connected, setConnected] = useState(false)
   const [csError, setCsError] = useState('')
   const [envs, setEnvs] = useState([])
@@ -46,6 +47,7 @@ export default function VerifyAccess({ data, update, next, back }) {
     try {
       const r = await axios.get('/api/cloudshare/validate', { params: { apiId, apiKey } })
       saveCSCreds({ apiId, apiKey })
+      if (apiKey) { setKeySaved(true); setApiKey('') }
       setEnvs(r.data.environments || [])
       setConnected(true)
       const b = await axios.get('/api/cloudshare/blueprints', { params: { apiId, apiKey, projectId: PROJECT_ID } }).catch(() => ({ data: [] }))
@@ -54,7 +56,7 @@ export default function VerifyAccess({ data, update, next, back }) {
       setBpId(data.clientBlueprintId || list.find(x => looksLikeZccBlueprint(x.name))?.id || '')
     } catch (e) { setCsError(e.response?.data?.error || e.message) }
   }
-  useEffect(() => { if (apiId && apiKey) connect() }, [])
+  useEffect(() => { csSecretSaved().then(s => { setKeySaved(s); if (apiId && s) connect() }) }, [])
 
   const loadEnv = async (id) => {
     if (!id) { setEnvDetail(null); return null }
@@ -150,9 +152,9 @@ export default function VerifyAccess({ data, update, next, back }) {
           <div style={{ marginTop: 8 }}>
             <div className="form-row">
               <div className="form-group"><label>CloudShare API ID</label><input value={apiId} onChange={e => setApiId(e.target.value)} /></div>
-              <div className="form-group"><label>CloudShare API Key</label><input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} /></div>
+              <div className="form-group"><label>CloudShare API Key</label><input type="password" placeholder={keySaved ? '•••••••• saved on this Mac' : ''} value={apiKey} onChange={e => setApiKey(e.target.value)} /></div>
             </div>
-            <button className="btn btn-secondary" onClick={connect} disabled={!apiId || !apiKey}>Connect to CloudShare</button>
+            <button className="btn btn-secondary" onClick={connect} disabled={!apiId || !(apiKey || keySaved)}>Connect to CloudShare</button>
           </div>
         ) : (
           <div style={{ marginTop: 8 }}>
