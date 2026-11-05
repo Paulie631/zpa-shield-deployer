@@ -2,7 +2,10 @@
 # Starts the fake backend + Vite, runs the browser test, stops both. Exit code = test result.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export HOME="${E2E_HOME:-$(mktemp -d)}"          # no real ~/.aws or secrets in tests
+# Keep real ~/.aws and secrets out of the test by using a throwaway HOME — but keep
+# Playwright's browser cache (it lives under the original HOME) reachable.
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+export HOME="${E2E_HOME:-$(mktemp -d)}"
 mkdir -p "$HOME/.aws"
 printf '[profile e2e]\nregion = us-east-1\n' > "$HOME/.aws/config"
 printf '[e2e]\naws_access_key_id = AKIAE2E\naws_secret_access_key = x\n' > "$HOME/.aws/credentials"
