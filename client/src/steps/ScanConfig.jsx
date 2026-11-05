@@ -48,6 +48,17 @@ export default function ScanConfig({ data, update, next, back }) {
   }
   useEffect(() => { loadSegments() }, [])
 
+  // AWS: make sure the scanner can reach the test apps (older stacks blocked it). Idempotent.
+  const [netNote, setNetNote] = useState('')
+  useEffect(() => {
+    if (data.target !== 'aws' || !data.vpcId) return
+    axios.post('/api/aws/open-scan-paths', {
+      accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey, sessionToken: data.sessionToken,
+      region: data.region, vpcId: data.vpcId, scannerStack: data.scannerStackName || 'zpa-app-scanner',
+    }).then(r => setNetNote('✅ Network paths for scanning are open: ' + (r.data.done || []).join('; ')))
+      .catch(e => setNetNote('⚠️ Couldn’t check the AWS network rules: ' + (e.response?.data?.error || e.message)))
+  }, [])
+
   // ── Create app segments for the test apps via the ZPA API ──
   const testIp = data.testAppsPrivateIp
   const testSegsExist = segments.some(s => (s.domainNames || []).includes(testIp))
@@ -124,6 +135,8 @@ export default function ScanConfig({ data, update, next, back }) {
         <input type="text" placeholder="Shield Scan" value={scanName} onChange={e => setScanName(e.target.value)} />
       </div>
 
+      {netNote && <div className="hint" style={{ marginBottom: 12 }}>{netNote}</div>}
+
       {testIp && !testSegsExist && !loadingSegs && (
         <div style={{ marginBottom: 16, padding: 14, border: '1px solid #bfdbfe', borderRadius: 8, background: '#eff6ff' }}>
           <strong>Create app segments for the test apps</strong>
@@ -165,7 +178,7 @@ export default function ScanConfig({ data, update, next, back }) {
             {segments.map(seg => (
               <div key={seg.id} className={`multi-select-item ${selectedSegments.includes(seg.id) ? 'selected' : ''}`}
                 onClick={() => toggleSegment(seg.id)}>
-                <input type="checkbox" readOnly checked={selectedSegments.includes(seg.id)} />
+                <input type="checkbox" readOnly checked={selectedSegments.includes(seg.id)} style={{ width: 'auto', flex: 'none' }} />
                 <span>{seg.name}</span>
                 {seg.domainNames?.[0] && <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 'auto' }}>{seg.domainNames[0]}</span>}
               </div>

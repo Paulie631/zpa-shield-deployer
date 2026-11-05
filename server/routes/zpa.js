@@ -192,10 +192,18 @@ const TEST_APPS = [
 const TEST_SEGMENT_GROUP = 'ZPA Shield Test Apps';
 const TEST_SERVER_GROUP = 'ZPA Shield Test Apps';
 
+// ZPA's `search` filter rejects names with spaces ("Invalid operand"), so page through
+// the full list and match the name exactly.
 async function findByName(base, headers, path, name) {
-  const r = await axios.get(`${base}/${path}`, { headers, params: { search: name, pagesize: 500 }, timeout: 15000 });
-  const list = r.data.list || (Array.isArray(r.data) ? r.data : []);
-  return list.find(x => x.name === name) || null;
+  for (let page = 1; page <= 20; page++) {
+    const r = await axios.get(`${base}/${path}`, { headers, params: { page, pagesize: 500 }, timeout: 15000 });
+    const list = r.data.list || (Array.isArray(r.data) ? r.data : []);
+    const hit = list.find(x => x.name === name);
+    if (hit) return hit;
+    const totalPages = parseInt(r.data.totalPages, 10) || 1;
+    if (page >= totalPages || list.length === 0) break;
+  }
+  return null;
 }
 
 router.post('/test-app-segments', async (req, res) => {

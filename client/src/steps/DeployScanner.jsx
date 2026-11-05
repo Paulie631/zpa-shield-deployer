@@ -11,6 +11,22 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
   const [error, setError] = useState('')
   const [launched, setLaunched] = useState(false)
   const [failures, setFailures] = useState([])
+  const [netFix, setNetFix] = useState(null)   // { state: 'running'|'done'|'error', lines, error }
+
+  // Stacks from older versions blocked scanner -> test apps traffic; add the rules (idempotent)
+  const openScanPaths = async () => {
+    setNetFix({ state: 'running', lines: [] })
+    try {
+      const r = await axios.post('/api/aws/open-scan-paths', {
+        accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey, sessionToken: data.sessionToken,
+        region: data.region, vpcId: data.vpcId, scannerStack: data.scannerStackName || 'zpa-app-scanner',
+      })
+      setNetFix({ state: 'done', lines: r.data.done || [] })
+    } catch (e) {
+      setNetFix({ state: 'error', lines: e.response?.data?.done || [], error: e.response?.data?.error || e.message })
+    }
+  }
+  useEffect(() => { if (stackStatus === 'CREATE_COMPLETE' && !netFix) openScanPaths() }, [stackStatus])
   const pollRef = useRef(null)
 
   // CloudShare: run the script on the VM through the CloudShare API
@@ -236,6 +252,17 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
               <strong>{o.OutputKey}:</strong> {o.OutputValue}
             </div>
           ))}
+          {stackStatus === 'CREATE_COMPLETE' && netFix && (
+            <div className={`alert ${netFix.state === 'error' ? 'alert-error' : netFix.state === 'done' ? 'alert-success' : 'alert-info'}`} style={{ display: 'block', marginTop: 10 }}>
+              {netFix.state === 'running' && <><span className="spinner spinner-blue" /> Opening the network paths the scan needs (scanner to test apps)...</>}
+              {netFix.state !== 'running' && <strong>Network paths for scanning:</strong>}
+              {netFix.lines.map((l, i) => <div key={i} style={{ fontSize: 13, marginTop: 2 }}>• {l}</div>)}
+              {netFix.error && <div style={{ fontSize: 13, marginTop: 4 }}>⚠️ {netFix.error} <button onClick={openScanPaths} style={{ fontSize: 12, marginLeft: 6 }}>↻ Retry</button></div>}
+            </div>
+          )}
+          {stackStatus === 'CREATE_COMPLETE' && (
+            <div className="hint" style={{ marginTop: 10 }}>⏳ The VM is still installing the connector and Docker, then reboots (about 5 to 10 minutes). It then appears in ZPA under App Connectors.</div>
+          )}
           {stackStatus === 'CREATE_COMPLETE' && (
             <a className="portal-link" style={{ marginTop: 12, display: 'inline-flex' }}
               href={`https://${data.region}.console.aws.amazon.com/cloudformation/home?region=${data.region}#/stacks`}

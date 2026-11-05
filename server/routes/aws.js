@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { CloudFormationClient, CreateStackCommand, DescribeStacksCommand, DescribeStackEventsCommand, DeleteStackCommand } = require('@aws-sdk/client-cloudformation');
-const { EC2Client, DescribeVpcsCommand, DescribeSubnetsCommand, DescribeKeyPairsCommand, DescribeImagesCommand } = require('@aws-sdk/client-ec2');
+const { CloudFormationClient, CreateStackCommand, DescribeStacksCommand, DescribeStackEventsCommand, DeleteStackCommand, DescribeStackResourceCommand } = require('@aws-sdk/client-cloudformation');
+const { EC2Client, DescribeVpcsCommand, DescribeSubnetsCommand, DescribeKeyPairsCommand, DescribeImagesCommand, AuthorizeSecurityGroupIngressCommand, AuthorizeSecurityGroupEgressCommand } = require('@aws-sdk/client-ec2');
 const { SSMClient, PutParameterCommand } = require('@aws-sdk/client-ssm');
 const { generateCfnTemplate } = require('../templates/cfnTemplate');
 const { generateSetupScript } = require('../templates/setupScript');
@@ -71,6 +71,24 @@ async function stackFailures(cfn, stackName) {
     .map(e => ({ resource: e.LogicalResourceId, type: e.ResourceType, reason: e.ResourceStatusReason }));
 }
 
+async function vpcCidr(ec2, vpcId) {
+  const r = await ec2.send(new DescribeVpcsCommand({ VpcIds: [vpcId] }));
+  const cidr = r.Vpcs?.[0]?.CidrBlock;
+  if (!cidr) throw new Error(`Couldn't read the address range of ${vpcId}`);
+  return cidr;
+}
+
+// Network paths the scan needs inside the VPC:
+//   test apps  <- tcp 80 / 3000 from the VPC (scanner + App Connectors reach apps directly)
+//   scanner    -> anything in the VPC (it probes the apps' ports)
+const TEST_APP_PORTS = [80, 3000];
+function testAppsIngress(cidr) {
+  return TEST_APP_PORTS.map(p => ({ IpProtocol: 'tcp', FromPort: p, ToPort: p, CidrIp: cidr, Description: `Test app port ${p} from the VPC` }));
+}
+function scannerEgressToVpc(cidr) {
+  return { IpProtocol: '-1', CidrIp: cidr, Description: 'Scan apps inside the VPC' };
+}
+
 function awsClients(accessKeyId, secretAccessKey, region, sessionToken) {
   const credentials = { accessKeyId: (accessKeyId || '').trim(), secretAccessKey: (secretAccessKey || '').trim() };
   if (sessionToken && sessionToken.trim()) credentials.sessionToken = sessionToken.trim();
@@ -119,7 +137,8 @@ router.post('/deploy', async (req, res) => {
     }));
 
     const script = generateSetupScript({ ssmParamName: ssmParamName || '/zpa/provisioning-key', provisioningKey, region });
-    const template = generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSize, script, imageId, ssmParamName: ssmParamName || '/zpa/provisioning-key' });
+    const cidr = await vpcCidr(ec2, vpcId);
+    const template = generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSize, script, imageId, vpcCidr: cidr, ssmParamName: ssmParamName || '/zpa/provisioning-key' });
 
     const finalStackName = stackName || 'zpa-app-scanner';
     await createStackOrReuse(cfn, {
@@ -166,6 +185,7 @@ router.post('/deploy-test-apps', async (req, res) => {
     // Same script as CloudShare: Docker CE (RHEL 9's own "docker" package is podman,
     // which has no docker service) + DVWA + Juice Shop
     const userDataScript = Buffer.from(generateTestAppsScript()).toString('base64');
+    const cidr = await vpcCidr(ec2, vpcId);
 
     const template = JSON.stringify({
       AWSTemplateFormatVersion: '2010-09-09',
@@ -174,8 +194,9 @@ router.post('/deploy-test-apps', async (req, res) => {
         TestAppsSecurityGroup: {
           Type: 'AWS::EC2::SecurityGroup',
           Properties: {
-            GroupDescription: 'ZPA Test Apps - allow outbound only (ZPA handles inbound)',
+            GroupDescription: 'ZPA Test Apps - ports 80 and 3000 from inside the VPC only',
             VpcId: vpcId,
+            SecurityGroupIngress: testAppsIngress(cidr),
             SecurityGroupEgress: [{ IpProtocol: '-1', CidrIp: '0.0.0.0/0' }]
           }
         },
@@ -216,6 +237,43 @@ router.post('/deploy-test-apps', async (req, res) => {
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/aws/open-scan-paths — add the VPC-internal rules to stacks deployed before
+// the templates had them. Safe to run repeatedly (existing rules are left alone).
+router.post('/open-scan-paths', async (req, res) => {
+  const { accessKeyId, secretAccessKey, sessionToken, region, vpcId, testAppsStack = 'zpa-test-apps', scannerStack = 'zpa-app-scanner' } = req.body;
+  const done = [];
+  try {
+    const { cfn, ec2 } = awsClients(accessKeyId, secretAccessKey, region, sessionToken);
+    const cidr = await vpcCidr(ec2, vpcId);
+    const sgOf = async (stack, logicalId) => {
+      try {
+        const r = await cfn.send(new DescribeStackResourceCommand({ StackName: stack, LogicalResourceId: logicalId }));
+        return r.StackResourceDetail?.PhysicalResourceId;
+      } catch (e) { return null; }
+    };
+    const ignoreDup = (e) => { if (!/Duplicate/i.test(`${e.name} ${e.Code} ${e.message}`)) throw e; };
+    const perm = ({ Description, CidrIp, ...p }) => ({ ...p, IpRanges: [{ CidrIp, Description }] });
+
+    const appsSg = await sgOf(testAppsStack, 'TestAppsSecurityGroup');
+    if (appsSg) {
+      for (const rule of testAppsIngress(cidr)) {
+        await ec2.send(new AuthorizeSecurityGroupIngressCommand({ GroupId: appsSg, IpPermissions: [perm(rule)] })).catch(ignoreDup);
+      }
+      done.push(`Test apps (${appsSg}): allow ports ${TEST_APP_PORTS.join(' and ')} from ${cidr}`);
+    } else done.push(`No ${testAppsStack} stack found, skipped`);
+
+    const scanSg = await sgOf(scannerStack, 'ZPAScannerSecurityGroup');
+    if (scanSg) {
+      await ec2.send(new AuthorizeSecurityGroupEgressCommand({ GroupId: scanSg, IpPermissions: [perm(scannerEgressToVpc(cidr))] })).catch(ignoreDup);
+      done.push(`App Scanner (${scanSg}): allow outbound to ${cidr}`);
+    } else done.push(`No ${scannerStack} stack found, skipped`);
+
+    res.json({ cidr, done });
+  } catch (err) {
+    res.status(400).json({ error: err.message, done });
   }
 });
 

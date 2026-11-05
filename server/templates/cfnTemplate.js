@@ -1,4 +1,4 @@
-function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSize, script, ssmParamName, imageId }) {
+function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSize, script, ssmParamName, imageId, vpcCidr }) {
   const userDataB64 = Buffer.from(script).toString('base64');
 
   return JSON.stringify({
@@ -33,10 +33,11 @@ function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSi
         Type: 'AWS::EC2::SecurityGroup',
         Properties: {
           // EC2 security group descriptions must be plain ASCII (no em dashes etc.)
-          GroupDescription: 'ZPA App Scanner - outbound 443 only (no inbound required)',
+          GroupDescription: 'ZPA App Scanner - outbound 443 plus the VPC (no inbound required)',
           VpcId: vpcId,
           SecurityGroupEgress: [
-            { IpProtocol: 'tcp', FromPort: 443, ToPort: 443, CidrIp: '0.0.0.0/0', Description: 'Zscaler PSE + repo access' }
+            { IpProtocol: 'tcp', FromPort: 443, ToPort: 443, CidrIp: '0.0.0.0/0', Description: 'Zscaler PSE + repo access' },
+            ...(vpcCidr ? [{ IpProtocol: '-1', CidrIp: vpcCidr, Description: 'Scan apps inside the VPC' }] : [])
           ]
         }
       },
