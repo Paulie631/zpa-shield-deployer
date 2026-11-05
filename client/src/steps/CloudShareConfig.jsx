@@ -491,7 +491,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
                                 </option>
                               ))}
                             </select>
-                            <div className="hint">Ubuntu, Debian, CentOS/RHEL/Rocky all work. 2 vCPU and 4 GB RAM is enough for both apps.</div>
+                            <div className="hint">Pick a current release (e.g. Ubuntu 22.04/24.04, Rocky/RHEL 9) whose VMs have internet access. 2 vCPU and 4 GB RAM is enough for both apps.</div>
                           </>
                         )}
                         <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>

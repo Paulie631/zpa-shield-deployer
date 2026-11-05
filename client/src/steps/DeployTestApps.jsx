@@ -42,7 +42,9 @@ export default function DeployTestApps({ data, update, next, back }) {
       } else if (r.data.failed) {
         clearInterval(logPollRef.current)
         setRunState('failed')
-        setRunError('The script stopped with an error — see the log below.')
+        setRunError(/NO INTERNET/.test(log)
+          ? 'The test apps VM has no internet access, so it cannot download Docker or the app images. Check the VM\'s network/internet settings in CloudShare (or use a different template), then try again.'
+          : 'The script stopped with an error — see the log below.')
       }
     } catch (e) {
       failCountRef.current += 1
