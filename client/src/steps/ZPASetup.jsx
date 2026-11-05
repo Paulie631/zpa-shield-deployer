@@ -1,7 +1,22 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 
+// Remember the ZPA Customer ID per tenant so it only has to be entered once.
+// (OneAPI has no endpoint to look it up, so it can't be discovered automatically.)
+const CID_STORAGE_KEY = 'zpa-shield-customer-ids'
+function loadSavedCid(tenantKey) {
+  try { return JSON.parse(localStorage.getItem(CID_STORAGE_KEY) || '{}')[tenantKey] || '' } catch { return '' }
+}
+function saveCid(tenantKey, cid) {
+  try {
+    const all = JSON.parse(localStorage.getItem(CID_STORAGE_KEY) || '{}')
+    all[tenantKey] = cid
+    localStorage.setItem(CID_STORAGE_KEY, JSON.stringify(all))
+  } catch {}
+}
+
 export default function ZPASetup({ data, update, next, back }) {
+  const tenantKey = data.vanityDomain || data.tenantUrl || 'default'
   const authParams = {
     authMode: data.authMode,
     tenantUrl: data.tenantUrl,
@@ -15,8 +30,8 @@ export default function ZPASetup({ data, update, next, back }) {
   const isAWS = data.target === 'aws'
 
   // Data from API
-  const [customerId, setCustomerId] = useState(data.customerId || '')
-  const [customerIdInput, setCustomerIdInput] = useState(data.customerId || '')
+  const [customerId, setCustomerId] = useState(data.customerId || loadSavedCid(tenantKey))
+  const [customerIdInput, setCustomerIdInput] = useState(data.customerId || loadSavedCid(tenantKey))
   const [connectorGroups, setConnectorGroups] = useState(data.connectorGroups || [])
   const [serverGroups, setServerGroups]       = useState([])
   const [enrollmentCerts, setEnrollmentCerts] = useState([])
@@ -70,6 +85,7 @@ export default function ZPASetup({ data, update, next, back }) {
       }
 
       const params = { ...authParams, customerId: cid }
+      if (/^\d+$/.test(cid || '')) saveCid(tenantKey, cid)
 
       // Fetch connector groups, enrollment certs, provisioning keys in parallel
       const [cgRes, certRes, keyRes, sgRes] = await Promise.allSettled([
