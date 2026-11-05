@@ -398,6 +398,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
                     <AddVmPanel apiId={apiId} apiKey={apiKey} envId={selectedEnv} regionId={envDetail.regionId}
                       existingVmIds={(envDetail.vms || []).map(v => v.id)}
                       rank={rankScannerTemplate} preferredName={PREFERRED_SCANNER_TEMPLATE}
+                      knownGood={{ projectId: PROJECT_ID, blueprintId: BP_APP_SCANNER, rank: -20, label: 'App Connector Base — prebuilt connector image, has internet' }}
                       title="Add a plain RHEL 9 VM for the App Scanner" vmName="App Scanner RHEL9"
                       recommendedText={describeScannerTemplate}
                       noneText="No RHEL 9 templates found. Type in the filter box to search all templates, or ask your CloudShare admin for a RHEL 9 template."
@@ -485,8 +486,11 @@ export default function CloudShareConfig({ data, update, next, back }) {
                       <AddVmPanel apiId={apiId} apiKey={apiKey} envId={selectedEnv} regionId={envDetail.regionId}
                         existingVmIds={(envDetail.vms || []).map(v => v.id)}
                         rank={rankTemplate} preferredName={PREFERRED_TESTAPPS_TEMPLATE}
+                        knownGood={{ projectId: PROJECT_ID, blueprintId: BP_APP_SCANNER, rank: 1000, label: 'App Connector Base — same image as your working VM' }}
                         title="Add a Linux VM for the test apps" vmName="ZPA Test Apps"
-                        recommendedText="Recommended — the newest supported Linux release available to you."
+                        recommendedText={t => t.knownGood
+                          ? 'Recommended — the same image as your connector VM, which we confirmed has internet. It is EL9, so Docker and the test apps install normally; its built-in connector is not enrolled and does nothing.'
+                          : 'Recommended — the newest supported Linux release available to you.'}
                         noneText="No current Linux templates found (Ubuntu 20.04+, Debian 11+, Rocky/RHEL 8+). Type in the filter box to search all templates."
                         onAdded={(detail, newId) => { setEnvDetail(detail); if (newId) setSelectedTestVm(newId); setShowAddTestVm(false) }}
                         onCancel={() => setShowAddTestVm(false)} />

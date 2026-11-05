@@ -218,15 +218,39 @@ router.get('/templates', async (req, res) => {
   }
 });
 
-// POST /api/cloudshare/envs/:envId/vms — add a VM from a template to an existing environment
+// GET /api/cloudshare/blueprint-machines — machines in a blueprint's default snapshot,
+// so a known-good machine can be added to an existing environment
+router.get('/blueprint-machines', async (req, res) => {
+  const { apiId, apiKey, projectId, blueprintId } = req.query;
+  try {
+    const bp = await csGet(apiId, apiKey, `/api/v3/projects/${encodeURIComponent(projectId)}/blueprints/${encodeURIComponent(blueprintId)}`);
+    const versions = bp.createFromVersions || [];
+    const snap = versions.find(v => v.isDefault) || versions.find(v => v.isLatest) || versions[0];
+    if (!snap) throw new Error('This blueprint has no snapshots');
+    let machines = snap.machines;
+    if (!machines || !machines.length) machines = (await csGet(apiId, apiKey, `/api/v3/snapshots/${encodeURIComponent(snap.id)}`)).machines || [];
+    res.json(machines.map(m => ({
+      machineId: m.id, name: m.name, os: m.osTypeName, snapshotName: snap.name,
+      resources: m.resources ? { cpuCount: m.resources.cpuCount, memorySizeMB: m.resources.memorySizeMB } : null,
+    })));
+  } catch (err) {
+    res.status(400).json({ error: csError(err) });
+  }
+});
+
+// POST /api/cloudshare/envs/:envId/vms — add a VM to an existing environment,
+// from a VM template (templateVmId) or from a blueprint snapshot machine (machineId)
 router.post('/envs/:envId/vms', async (req, res) => {
-  const { apiId, apiKey, templateVmId, name, description } = req.body;
+  const { apiId, apiKey, templateVmId, machineId, name, description } = req.body;
   const { envId } = req.params;
   try {
-    if (!templateVmId) throw new Error('templateVmId is required');
+    if (!templateVmId && !machineId) throw new Error('templateVmId or machineId is required');
+    const item = machineId
+      ? { type: 4, machineId, disconnectedFromNetworks: false }
+      : { type: 2, templateVmId };
     const result = await csPut(apiId, apiKey, '/api/v3/envs', {
       envId,
-      itemsCart: [{ type: 2, name: name || 'ZPA Test Apps', description: description || 'DVWA + Juice Shop — added by ZPA Shield Deployer', templateVmId }],
+      itemsCart: [{ ...item, name: name || 'ZPA Test Apps', description: description || 'Added by ZPA Shield Deployer' }],
     });
     res.json(result);
   } catch (err) {

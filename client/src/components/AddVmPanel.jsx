@@ -3,8 +3,9 @@ import axios from 'axios'
 
 // Adds a VM from a CloudShare template to an environment, waits for it to start,
 // then optionally resizes it. `rank(name)` orders templates (higher is better, < 0 = not recommended).
+// `knownGood` = { projectId, blueprintId, rank, label } adds that blueprint's machine(s) to the list.
 export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmIds, rank, title, vmName,
-  preferredName, recommendedText, noneText, resize, onAdded, onCancel }) {
+  preferredName, recommendedText, noneText, resize, knownGood, onAdded, onCancel }) {
   const [templates, setTemplates] = useState(null)
   const [templateId, setTemplateId] = useState('')
   const [filter, setFilter] = useState('')
@@ -15,10 +16,16 @@ export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmI
   useEffect(() => () => clearInterval(pollRef.current), [])
 
   useEffect(() => {
-    axios.get('/api/cloudshare/templates', { params: { apiId, apiKey, regionId } })
-      .then(r => {
+    const fromBlueprint = knownGood
+      ? axios.get('/api/cloudshare/blueprint-machines', { params: { apiId, apiKey, projectId: knownGood.projectId, blueprintId: knownGood.blueprintId } })
+          .then(r => (r.data || []).map(m => ({ id: 'bp:' + m.machineId, machineId: m.machineId, knownGood: true,
+            name: `${knownGood.label} (${m.name})`, resources: m.resources, rank: knownGood.rank })))
+          .catch(() => [])
+      : Promise.resolve([])
+    Promise.all([axios.get('/api/cloudshare/templates', { params: { apiId, apiKey, regionId } }), fromBlueprint])
+      .then(([r, bpMachines]) => {
         const pref = (preferredName || '').trim().toLowerCase()
-        const list = (r.data || []).map(t => ({ ...t, rank: (pref && t.name.toLowerCase() === pref) ? 10000 : rank(t.name) }))
+        const list = [...bpMachines, ...(r.data || []).map(t => ({ ...t, rank: (pref && t.name.toLowerCase() === pref) ? 10000 : rank(t.name) }))]
           .sort((a, b) => b.rank - a.rank
             || ((b.resources?.memorySizeMB || 0) - (a.resources?.memorySizeMB || 0))
             || a.name.localeCompare(b.name))
@@ -32,7 +39,10 @@ export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmI
     setBusy(true); setError(''); setStatus('🚀 Adding VM to the environment...')
     const before = new Set(existingVmIds)
     try {
-      await axios.post(`/api/cloudshare/envs/${envId}/vms`, { apiId, apiKey, templateVmId: templateId, name: vmName })
+      const pick = (templates || []).find(t => t.id === templateId)
+      await axios.post(`/api/cloudshare/envs/${envId}/vms`, pick?.machineId
+        ? { apiId, apiKey, machineId: pick.machineId, name: vmName }
+        : { apiId, apiKey, templateVmId: templateId, name: vmName })
       let attempts = 0
       pollRef.current = setInterval(async () => {
         attempts++
@@ -67,7 +77,7 @@ export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmI
     }
   }
 
-  const shown = (templates || []).filter(t => filter ? t.name.toLowerCase().includes(filter.toLowerCase()) : t.rank > -50)
+  const shown = (templates || []).filter(t => t.knownGood || (filter ? t.name.toLowerCase().includes(filter.toLowerCase()) : t.rank > -50))
   const best = templates?.[0]?.rank ?? 0
   const chosen = (templates || []).find(t => t.id === templateId)
 
@@ -85,7 +95,7 @@ export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmI
             <option value="">— Select a template ({shown.length} shown) —</option>
             {shown.map(t => (
               <option key={t.id} value={t.id}>
-                {t.rank === best && t.rank > 0 ? '★ ' : ''}{t.name}{t.resources ? ` — ${t.resources.cpuCount} vCPU, ${Math.round(t.resources.memorySizeMB / 1024)} GB RAM` : ''}{t.rank < 0 && t.rank > -50 ? ' (not recommended)' : ''}
+                {t.rank === best && t.rank > 0 ? '★ ' : ''}{t.knownGood ? '✓ ' : ''}{t.name}{t.resources ? ` — ${t.resources.cpuCount} vCPU, ${Math.round(t.resources.memorySizeMB / 1024)} GB RAM` : ''}{t.rank < 0 && t.rank > -50 ? ' (not recommended)' : ''}
               </option>
             ))}
           </select>
