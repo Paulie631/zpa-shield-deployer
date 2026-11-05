@@ -28,7 +28,10 @@ function generateConnectorScript({ provisioningKey }) {
     'chmod 644 /opt/zscaler/var/provision_key',
     '',
     'echo "=== Step 4: Starting ZPA App Connector ==="',
-    'systemctl enable --now zpa-connector',
+    'systemctl enable zpa-connector',
+    'systemctl restart zpa-connector',
+    'sleep 5',
+    'systemctl --no-pager --lines=5 status zpa-connector || true',
     'echo "Connector setup complete!"',
   ].join('\n')
 }

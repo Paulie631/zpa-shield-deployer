@@ -99,7 +99,9 @@ export default function ZPASetup({ data, update, next, back }) {
         const groups = cgRes.value.data || []
         setConnectorGroups(groups)
         // Auto-select if only one or if previously selected
-        if (!connectorGroupId && groups.length === 1) setConnectorGroupId(groups[0].id)
+        // Don't default to the traffic-forwarding group created by Publish Apps
+        const candidates = groups.filter(g => g.id !== data.trafficGroupId)
+        if (!connectorGroupId && candidates.length === 1) setConnectorGroupId(candidates[0].id)
       } else {
         const e = cgRes.reason
         setLoadError(e?.response?.data?.error || e?.message || 'Could not load connector groups')
@@ -287,6 +289,9 @@ export default function ZPASetup({ data, update, next, back }) {
             value={connectorGroupId} onChange={e => setConnectorGroupId(e.target.value)} />
         ) : null}
         <div className="hint">Must be a dedicated group — do not mix with traffic-forwarding connectors.</div>
+        {connectorGroupId && connectorGroupId === data.trafficGroupId && (
+          <div className="hint" style={{ color: '#dc2626' }}>⚠️ That is the traffic-forwarding group created by Publish Apps. The App Scanner needs its own group — create a new one below.</div>
+        )}
 
         {!showNewGroup ? (
           <button onClick={() => setShowNewGroup(true)} disabled={creating}

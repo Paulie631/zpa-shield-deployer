@@ -4,6 +4,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { generateSetupScript } = require('../templates/setupScript');
 const { generateTestAppsScript } = require('../templates/testAppsScript');
+const { generateConnectorScript } = require('../templates/connectorScript');
 
 const CS_BASE = 'https://use.cloudshare.com';
 
@@ -267,6 +268,7 @@ router.post('/envs/:envId/vms', async (req, res) => {
 const JOBS = {
   'zpa-setup':    { done: 'Setup complete!' },
   'zpa-testapps': { done: 'Test apps ready!' },
+  'zpa-traffic':  { done: 'Connector setup complete!' },
 };
 const FAIL_MARKER = 'SCRIPT FAILED';
 const CHUNK = 1500;
@@ -478,6 +480,20 @@ router.post('/vms/:vmId/run-setup', async (req, res) => {
 });
 
 // POST /api/cloudshare/vms/:vmId/run-testapps — install Docker and start DVWA + Juice Shop
+// POST /api/cloudshare/vms/:vmId/run-traffic-connector — enroll a standard App Connector on a VM
+// (the test apps VM: the prebuilt connector image already has zpa-connector, it just needs a key)
+router.post('/vms/:vmId/run-traffic-connector', async (req, res) => {
+  const { apiId, apiKey, provisioningKey } = req.body;
+  const stage = { now: 'preparing' };
+  try {
+    if (!provisioningKey) throw new Error('No provisioning key for the traffic connector');
+    res.json(await uploadAndStart(apiId, apiKey, req.params.vmId, generateConnectorScript({ provisioningKey }), 'zpa-traffic', stage));
+  } catch (err) {
+    console.error('[run-traffic-connector error]', stage.now, err.response?.status, csError(err));
+    res.status(400).json({ error: `Failed while ${stage.now}: ${csError(err)}`, stage: stage.now });
+  }
+});
+
 router.post('/vms/:vmId/run-testapps', async (req, res) => {
   const { apiId, apiKey } = req.body;
   const stage = { now: 'preparing' };

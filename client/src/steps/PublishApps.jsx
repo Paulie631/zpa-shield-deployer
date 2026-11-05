@@ -23,6 +23,9 @@ export default function PublishApps({ data, update, next, back }) {
   const [segs, setSegs] = useState(data.publishSegs || { state: 'idle', lines: [] })
   const [rule, setRule] = useState(data.publishRule || { state: 'idle', lines: [] })
   const [stack, setStack] = useState({ status: '', ip: '', failures: [] })
+  const [csLog, setCsLog] = useState('')            // CloudShare: traffic connector install log
+  const csLogRef = useRef(null)
+  useEffect(() => () => clearInterval(csLogRef.current), [])
   const [running, setRunning] = useState(false)
   const pollRef = useRef(null)
   useEffect(() => () => clearInterval(pollRef.current), [])
@@ -62,8 +65,25 @@ export default function PublishApps({ data, update, next, back }) {
         pollRef.current = setInterval(pollStack, 8000)
         pollStack()
       }
-      if (!isAWS) lines.push('No VM is deployed for it on CloudShare: enroll an App Connector that can reach the test apps using the provisioning key below')
-      setConn({ state: 'done', lines, groupId: z.data.groupId, key: isAWS ? undefined : z.data.provisioningKey })
+      if (!isAWS) {
+        if (data.csTestVmId && data.csApiId) {
+          // The test apps VM is Zscaler's connector image: enroll it with the new key
+          await axios.post(`/api/cloudshare/vms/${encodeURIComponent(data.csTestVmId)}/run-traffic-connector`,
+            { apiId: data.csApiId, apiKey: data.csApiKey, provisioningKey: z.data.provisioningKey }, { timeout: 300000 })
+          lines.push(`Enrolling ${data.csTestVmName || 'the test apps VM'} as the traffic connector (it already has the connector software)`)
+          clearInterval(csLogRef.current)
+          csLogRef.current = setInterval(async () => {
+            try {
+              const r = await axios.get(`/api/cloudshare/vms/${encodeURIComponent(data.csTestVmId)}/setup-log`, { params: { apiId: data.csApiId, apiKey: data.csApiKey, job: 'zpa-traffic' } })
+              setCsLog(r.data.log || '')
+              if (r.data.done || r.data.failed) clearInterval(csLogRef.current)
+            } catch {}
+          }, 10000)
+        } else {
+          lines.push('No test apps VM is selected on CloudShare: enroll an App Connector that can reach the test apps using the provisioning key below')
+        }
+      }
+      setConn({ state: 'done', lines, groupId: z.data.groupId, key: isAWS || data.csTestVmId ? undefined : z.data.provisioningKey })
       return z.data.groupId
     } catch (e) { setConn({ state: 'error', lines: [], error: errOf(e) }); throw e }
   }
@@ -146,8 +166,10 @@ export default function PublishApps({ data, update, next, back }) {
       <Part n={1} title="Traffic App Connector" part={conn} onRetry={() => doConnector().catch(() => {})}
         desc={isAWS
           ? <>An ordinary App Connector in your VPC, in its own group (“ZPA Shield Traffic Connectors”), so the App Scanner group stays dedicated to scanning.</>
-          : <>A connector group (“ZPA Shield Traffic Connectors”) and provisioning key for an App Connector that can reach the test apps.</>}
-        extra={isAWS ? stackBox : (conn.key && (
+          : <>A connector group (“ZPA Shield Traffic Connectors”) and provisioning key, enrolled on {data.csTestVmName || 'the test apps VM'} (Zscaler’s connector image) so it also carries user traffic.</>}
+        extra={isAWS ? stackBox : csLog ? (
+          <pre style={{ margin: '8px 0 0 24px', maxHeight: 180, overflow: 'auto', background: '#0f172a', color: '#e2e8f0', padding: 8, borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap' }}>{csLog}</pre>
+        ) : (conn.key && (
           <div style={{ margin: '8px 0 0 24px' }}>
             <div className="hint">Provisioning key — keep it private:</div>
             <pre style={{ background: '#0f172a', color: '#e2e8f0', padding: 8, borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{conn.key}</pre>

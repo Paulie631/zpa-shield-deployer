@@ -19,7 +19,7 @@ export default function Done({ data, goTo }) {
       <div className="summary-grid">
         <div className="summary-item">
           <div className="label">Deployment Target</div>
-          <div className="value">{isAWS ? `☁️ AWS — ${data.region}` : `🖥️ CloudShare — ${data.csHostname}`}</div>
+          <div className="value">{isAWS ? `☁️ AWS — ${data.region}` : `🖥️ CloudShare — ${data.csEnvName || data.csVmName || data.csHostname || ''}`}</div>
         </div>
         {isAWS && data.scannerStackName && (
           <div className="summary-item">

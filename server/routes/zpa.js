@@ -323,7 +323,9 @@ router.post('/verify-publish', async (req, res) => {
         if (page >= (parseInt(r.data.totalPages, 10) || 1)) break;
       }
       const mine = conns.filter(c => c.appConnectorGroupId === group.id || c.appConnectorGroupName === TRAFFIC_GROUP);
-      const online = mine.filter(c => /AUTHENTICATED|CONNECTED|ONLINE/i.test(c.controlChannelStatus || ''));
+      // ZPA reports e.g. ZPN_STATUS_AUTHENTICATED (online) / ZPN_STATUS_DISCONNECTED (offline)
+      const isOnline = (s = '') => /AUTHENTICATED|ONLINE/i.test(s) || (/CONNECTED/i.test(s) && !/DISCONNECTED/i.test(s));
+      const online = mine.filter(c => isOnline(c.controlChannelStatus));
       checks.push({
         id: 'connector', ok: online.length > 0, label: 'Traffic App Connector online',
         detail: mine.length === 0
