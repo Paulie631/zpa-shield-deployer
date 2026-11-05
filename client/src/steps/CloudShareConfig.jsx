@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
+import NetworkCheck from '../components/NetworkCheck'
+import AddVmPanel from '../components/AddVmPanel'
+import { rankTemplate, rankScannerTemplate, SCANNER_SPEC } from '../lib/templates'
 
 const CS_STORAGE_KEY = 'zpa-cs-creds'
 const PROJECT_ID     = 'PRotcbPOeZ9_Dd4lJww1o-6A2'
@@ -7,6 +10,9 @@ const BP_APP_SCANNER = 'BPps02yDq1W9eCQwn3xyjMgQ2'
 const BP_NAME        = 'App Connector Base'
 const REGION_MIAMI   = 'REKolD1-ab84YIxODeMGob9A2'
 const POLICY_ID      = 'POEsi2O9SdO2D3GM-EZWuD6g2'
+// Exact CloudShare template names to prefer (empty = let the wizard rank them)
+const PREFERRED_TESTAPPS_TEMPLATE = ''
+const PREFERRED_SCANNER_TEMPLATE  = ''
 
 function loadCSCreds() {
   try { return JSON.parse(localStorage.getItem(CS_STORAGE_KEY) || '{}') } catch { return {} }
@@ -27,41 +33,6 @@ const REGIONS = [
   { id: 'RE6OEZs-y-mkK1mEMGwIgZiw2',  label: '🇳🇱 EU (Amsterdam)' },
 ]
 
-// Rank VM templates for the test apps VM. Higher is better; below 0 means outdated.
-// The test apps script supports apt (Ubuntu/Debian) and dnf (RHEL family).
-export function rankTemplate(name = '') {
-  const n = name.toLowerCase()
-  if (/windows/.test(n)) return -100
-  const ubuntu = n.match(/ubuntu[^0-9]*(\d{2})\.(\d{2})/)
-  if (ubuntu) {
-    const v = parseInt(ubuntu[1] + ubuntu[2], 10)        // 24.04 -> 2404
-    const lts = ubuntu[2] === '04'
-    if (v < 2004) return -10                            // 18.04 and older: out of support
-    return lts ? 500 + (v - 2000) / 10 : 300 + (v - 2000) / 10   // LTS (24.04 -> 540) beats interim releases
-  }
-  if (/ubuntu/.test(n)) {
-    if (/xenial|trusty|bionic|precise/.test(n)) return -10
-    if (/noble/.test(n)) return 540
-    if (/jammy/.test(n)) return 520
-    if (/focal/.test(n)) return 500
-    return 100                                          // Ubuntu, version unknown
-  }
-  const rhel = n.match(/(rocky|alma|rhel|red ?hat|centos stream|centos)[^0-9]*(\d+)/)
-  if (rhel) {
-    const v = parseInt(rhel[2], 10)
-    if (v >= 9) return 520
-    if (v === 8) return 480
-    return -10                                          // CentOS 7 and older
-  }
-  const debian = n.match(/debian[^0-9]*(\d+)/)
-  if (debian) {
-    const v = parseInt(debian[1], 10)
-    return v >= 12 ? 510 : v === 11 ? 470 : -10
-  }
-  if (/rocky|alma|rhel|red ?hat|debian|centos|fedora|linux/.test(n)) return 50
-  return -50                                            // not obviously Linux
-}
-
 export default function CloudShareConfig({ data, update, next, back }) {
   const saved = loadCSCreds()
 
@@ -81,13 +52,11 @@ export default function CloudShareConfig({ data, update, next, back }) {
 
   // Second VM for the test apps (DVWA + Juice Shop)
   const [selectedTestVm, setSelectedTestVm] = useState(data.csTestVmId || '')
-  const [showAddVm, setShowAddVm]       = useState(false)
-  const [templates, setTemplates]       = useState(null)
-  const [templateId, setTemplateId]     = useState('')
-  const [templateFilter, setTemplateFilter] = useState('')
-  const [addingVm, setAddingVm]         = useState(false)
-  const [addVmStatus, setAddVmStatus]   = useState('')
-  const addPollRef = useRef(null)
+  const [showAddTestVm, setShowAddTestVm] = useState(false)
+  const [showAddScanner, setShowAddScanner] = useState(false)
+  const [testNet, setTestNet]           = useState(undefined)   // network check result for the test apps VM
+  const [addNote, setAddNote]           = useState('')
+  const [resizing, setResizing]         = useState(false)
 
   // Create-new-env state
   const [showCreate, setShowCreate]     = useState(false)
@@ -105,7 +74,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
   }, [])
 
   // Cleanup poll on unmount
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); if (addPollRef.current) clearInterval(addPollRef.current) }, [])
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   const connect = async () => {
     setLoading(true); setError('')
@@ -195,62 +164,25 @@ export default function CloudShareConfig({ data, update, next, back }) {
     }
   }
 
-  // ── Add a second VM (for test apps) from a CloudShare template ──
-  const LINUX_RE = /ubuntu|debian|centos|rhel|red ?hat|rocky|alma|fedora|linux/i
-  const loadTemplates = async () => {
-    setShowAddVm(true); setError('')
-    if (templates) return
+  // Resize the chosen scanner VM to App Shield spec
+  const resizeScanner = async () => {
+    setResizing(true); setAddNote(''); setError('')
     try {
-      const r = await axios.get('/api/cloudshare/templates', { params: { apiId, apiKey, regionId: envDetail?.regionId } })
-      // Best first: newest supported release, then more CPU/RAM, then name
-      const list = (r.data || []).map(t => ({ ...t, rank: rankTemplate(t.name) }))
-        .sort((a, b) => b.rank - a.rank
-          || ((b.resources?.memorySizeMB || 0) - (a.resources?.memorySizeMB || 0))
-          || a.name.localeCompare(b.name))
-      setTemplates(list)
-      if (list[0] && list[0].rank > 0) setTemplateId(list[0].id)
-    } catch (e) { setError(e.response?.data?.error || e.message); setTemplates([]) }
-  }
-
-  const addTestVm = async () => {
-    setAddingVm(true); setError(''); setAddVmStatus('🚀 Adding VM to the environment...')
-    const before = new Set((envDetail?.vms || []).map(v => v.id))
-    try {
-      await axios.post(`/api/cloudshare/envs/${selectedEnv}/vms`, { apiId, apiKey, templateVmId: templateId, name: 'ZPA Test Apps' })
-      setShowAddVm(false)
-      let attempts = 0
-      addPollRef.current = setInterval(async () => {
-        attempts++
-        try {
-          const detail = await axios.get(`/api/cloudshare/envs/${selectedEnv}`, { params: { apiId, apiKey } })
-          const added = (detail.data.vms || []).find(v => !before.has(v.id))
-          setAddVmStatus(`⏳ Environment: ${detail.data.statusText} | New VM: ${added?.statusText || 'not listed yet'} — please wait...`)
-          if (added && detail.data.statusText === 'Ready' && (added.statusText === 'Running' || added.statusText === 'Ready')) {
-            clearInterval(addPollRef.current)
-            setEnvDetail(detail.data); setSelectedTestVm(added.id)
-            setAddVmStatus(''); setAddingVm(false)
-          } else if (attempts > 75) { // ~10 min
-            clearInterval(addPollRef.current)
-            setEnvDetail(detail.data)
-            setAddVmStatus('⚠️ The new VM is taking longer than expected — check the CloudShare portal, then pick it here once it is running.')
-            setAddingVm(false)
-          }
-        } catch (e) { /* ignore poll errors */ }
-      }, 8000)
-    } catch (err) {
-      setAddingVm(false); setAddVmStatus('')
-      setError(err.response?.data?.error || err.message || 'Failed to add VM')
-    }
+      const r = await axios.put(`/api/cloudshare/vms/${selectedVm}/hardware`, { apiId, apiKey, ...SCANNER_SPEC })
+      if (r.data?.conflictsFound) setAddNote(`CloudShare reported a conflict resizing: ${r.data.conflicts}.`)
+      const d = await axios.get(`/api/cloudshare/envs/${selectedEnv}`, { params: { apiId, apiKey } })
+      setEnvDetail(d.data)
+    } catch (e) { setError('Resize failed: ' + (e.response?.data?.error || e.message)) }
+    finally { setResizing(false) }
   }
 
   const selectedVmDetail = envDetail?.vms?.find(v => v.id === selectedVm)
   const otherVms = (envDetail?.vms || []).filter(v => v.id !== selectedVm)
   const testVmDetail = otherVms.find(v => v.id === selectedTestVm)
-  const shownTemplates = (templates || []).filter(t =>
-    templateFilter ? t.name.toLowerCase().includes(templateFilter.toLowerCase()) : t.rank > -50)
-  const bestRank = templates?.[0]?.rank ?? 0
-  const chosenTemplate = (templates || []).find(t => t.id === templateId)
-  const canContinue = connected && selectedEnv && selectedVm && selectedVmDetail && !creating && !addingVm
+  const scannerUnderSpec = selectedVmDetail && ((selectedVmDetail.cpuCount || 0) < SCANNER_SPEC.numCpus
+    || (selectedVmDetail.memorySizeMb || 0) < SCANNER_SPEC.memorySizeMBs || (selectedVmDetail.diskSizeGb || 0) < 150)
+  const scannerIsPrebuilt = selectedVmDetail && /connector/i.test(selectedVmDetail.name || '')
+  const canContinue = connected && selectedEnv && selectedVm && selectedVmDetail && !creating && !showAddTestVm && !showAddScanner && !resizing
 
   const handleContinue = () => {
     update({
@@ -268,6 +200,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
       csTestVmId: testVmDetail?.id || '',
       csTestVmName: testVmDetail?.name || '',
       csTestVmIp: testVmDetail?.internalAddresses?.[0] || testVmDetail?.externalAddress || '',
+      csTestVmNetOk: testVmDetail ? (testNet ? (testNet.ok || testNet.dnsOnly) : null) : null,
     })
     next()
   }
@@ -440,6 +373,40 @@ export default function CloudShareConfig({ data, update, next, back }) {
                   )}
                 </div>
 
+                {/* App Scanner VM: spec + prebuilt-image warnings, add a plain RHEL 9 VM */}
+                {selectedVmDetail && (scannerIsPrebuilt || scannerUnderSpec) && (
+                  <div className="alert alert-warning" style={{ marginBottom: '12px', display: 'block' }}>
+                    {scannerIsPrebuilt && <div>⚠️ <strong>{selectedVmDetail.name}</strong> looks like Zscaler’s prebuilt App Connector image. App Shield’s scanner needs a <strong>plain RHEL 9</strong> VM (RPM install) — add one below.</div>}
+                    {scannerUnderSpec && <div style={{ marginTop: scannerIsPrebuilt ? 6 : 0 }}>⚠️ This VM is {selectedVmDetail.cpuCount} vCPU / {Math.round((selectedVmDetail.memorySizeMb || 0) / 1024)} GB RAM / {selectedVmDetail.diskSizeGb} GB disk. The App Scanner needs {SCANNER_SPEC.numCpus} vCPU / {SCANNER_SPEC.memorySizeMBs / 1024} GB RAM / 120 GB free in /var.
+                      {!scannerIsPrebuilt && (
+                        <button onClick={resizeScanner} disabled={resizing} style={{ marginLeft: 8, fontSize: 12, padding: '2px 8px', border: '1px solid #d97706', borderRadius: 4, background: '#fff', cursor: 'pointer' }}>
+                          {resizing ? 'Resizing...' : `Resize to ${SCANNER_SPEC.numCpus} vCPU / ${SCANNER_SPEC.memorySizeMBs / 1024} GB / ${SCANNER_SPEC.diskSizeGBs} GB`}
+                        </button>
+                      )}
+                    </div>}
+                  </div>
+                )}
+                {addNote && <div className="alert alert-warning" style={{ marginBottom: '12px' }}><span>⚠️ {addNote}</span></div>}
+                {!showAddScanner ? (
+                  <button onClick={() => setShowAddScanner(true)} disabled={showAddTestVm}
+                    style={{ fontSize: '13px', padding: '6px 14px', background: 'none', border: '1px solid #2563eb', borderRadius: '6px', cursor: 'pointer', color: '#2563eb', marginBottom: '12px' }}>
+                    ➕ Add a plain RHEL 9 VM for the App Scanner
+                  </button>
+                ) : (
+                  <div style={{ marginBottom: '12px' }}>
+                    <AddVmPanel apiId={apiId} apiKey={apiKey} envId={selectedEnv} regionId={envDetail.regionId}
+                      existingVmIds={(envDetail.vms || []).map(v => v.id)}
+                      rank={rankScannerTemplate} preferredName={PREFERRED_SCANNER_TEMPLATE}
+                      title="Add a plain RHEL 9 VM for the App Scanner" vmName="App Scanner RHEL9"
+                      recommendedText="Recommended — plain RHEL 9, as Zscaler requires for the App Scanner."
+                      noneText="No RHEL 9 templates found. Type in the filter box to search all templates, or ask your CloudShare admin for a RHEL 9 template."
+                      resize={SCANNER_SPEC}
+                      onAdded={(detail, newId, note) => { setEnvDetail(detail); if (newId) setSelectedVm(newId); setAddNote(note); setShowAddScanner(false) }}
+                      onCancel={() => setShowAddScanner(false)} />
+                  </div>
+                )}
+                {selectedVmDetail && <div style={{ marginBottom: '12px' }}><NetworkCheck vm={selectedVmDetail} apiId={apiId} apiKey={apiKey} /></div>}
+
                 {/* Connection details */}
                 {selectedVmDetail && (
                   <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '14px 16px', marginBottom: '16px', fontSize: '13px' }}>
@@ -473,7 +440,6 @@ export default function CloudShareConfig({ data, update, next, back }) {
                     <div className="hint" style={{ marginBottom: '8px' }}>
                       A separate Linux VM in the same environment, so the App Scanner VM keeps its resources and its reboot doesn’t take the apps down. Optional — leave it unselected to set up test apps yourself.
                     </div>
-                    {addVmStatus && <div className="alert alert-info" style={{ marginBottom: '10px' }}>{addVmStatus}</div>}
                     {otherVms.length > 0 && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
                         {otherVms.map(vm => (
@@ -508,51 +474,21 @@ export default function CloudShareConfig({ data, update, next, back }) {
                         ⚠️ This VM appears to be <strong>{testVmDetail.os}</strong>. The test apps need a Linux VM (Ubuntu/Debian or RHEL-family).
                       </div>
                     )}
-                    {!addingVm && !showAddVm && (
-                      <button onClick={loadTemplates}
-                        style={{ fontSize: '13px', padding: '6px 14px', background: 'none', border: '1px solid #2563eb', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}>
+                    {testVmDetail && <NetworkCheck vm={testVmDetail} apiId={apiId} apiKey={apiKey} onResult={setTestNet} />}
+                    {!showAddTestVm ? (
+                      <button onClick={() => setShowAddTestVm(true)} disabled={showAddScanner}
+                        style={{ marginTop: '10px', fontSize: '13px', padding: '6px 14px', background: 'none', border: '1px solid #2563eb', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}>
                         ➕ Add a VM to this environment for test apps
                       </button>
-                    )}
-                    {showAddVm && (
-                      <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontWeight: 600, marginBottom: '8px' }}>Add a Linux VM from a CloudShare template</div>
-                        {templates === null ? (
-                          <div style={{ fontSize: '13px', color: '#64748b' }}>🔄 Loading templates...</div>
-                        ) : (
-                          <>
-                            <input type="text" placeholder="Filter templates by name (default shows Linux templates)"
-                              value={templateFilter} onChange={e => setTemplateFilter(e.target.value)} style={{ marginBottom: '8px' }} />
-                            <select value={templateId} onChange={e => setTemplateId(e.target.value)}>
-                              <option value="">— Select a template ({shownTemplates.length} shown) —</option>
-                              {shownTemplates.map(t => (
-                                <option key={t.id} value={t.id}>
-                                  {t.rank === bestRank && t.rank > 0 ? '★ ' : ''}{t.name}{t.resources ? ` — ${t.resources.cpuCount} vCPU, ${Math.round(t.resources.memorySizeMB/1024)} GB RAM` : ''}{t.rank < 0 ? ' (outdated)' : ''}
-                                </option>
-                              ))}
-                            </select>
-                            {chosenTemplate && chosenTemplate.rank > 0 && chosenTemplate.rank === bestRank && (
-                              <div className="hint" style={{ color: '#16a34a' }}>★ Recommended — the newest supported Linux release available to you.</div>
-                            )}
-                            {chosenTemplate && chosenTemplate.rank < 0 && (
-                              <div className="hint" style={{ color: '#dc2626' }}>This release is outdated and likely won’t install Docker cleanly. Pick a ★ template if you can.</div>
-                            )}
-                            {templates.length > 0 && bestRank <= 0 && (
-                              <div className="hint" style={{ color: '#d97706' }}>No current Linux templates found (Ubuntu 20.04+, Debian 11+, Rocky/RHEL 8+). Type in the filter box to search all templates.</div>
-                            )}
-                            <div className="hint">The VM also needs internet access to download Docker and the app images. 2 vCPU and 4 GB RAM is enough for both apps.</div>
-                          </>
-                        )}
-                        <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                          <button className="btn btn-primary" onClick={addTestVm} disabled={!templateId} style={{ fontSize: '13px' }}>
-                            ➕ Add VM
-                          </button>
-                          <button onClick={() => setShowAddVm(false)}
-                            style={{ fontSize: '13px', padding: '6px 14px', background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
+                    ) : (
+                      <AddVmPanel apiId={apiId} apiKey={apiKey} envId={selectedEnv} regionId={envDetail.regionId}
+                        existingVmIds={(envDetail.vms || []).map(v => v.id)}
+                        rank={rankTemplate} preferredName={PREFERRED_TESTAPPS_TEMPLATE}
+                        title="Add a Linux VM for the test apps" vmName="ZPA Test Apps"
+                        recommendedText="Recommended — the newest supported Linux release available to you."
+                        noneText="No current Linux templates found (Ubuntu 20.04+, Debian 11+, Rocky/RHEL 8+). Type in the filter box to search all templates."
+                        onAdded={(detail, newId) => { setEnvDetail(detail); if (newId) setSelectedTestVm(newId); setShowAddTestVm(false) }}
+                        onCancel={() => setShowAddTestVm(false)} />
                     )}
                   </div>
                 )}

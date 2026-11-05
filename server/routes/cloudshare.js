@@ -306,6 +306,64 @@ async function uploadAndStart(apiId, apiKey, vmId, script, job, stage) {
   return { started: true, runsAs: isRoot ? 'root' : 'sudo', logPath: logFile, job };
 }
 
+// Run a short script on the VM in one command (base64 keeps the quoting safe)
+async function runInline(apiId, apiKey, vmId, script, timeoutMs = 60000) {
+  const b64 = Buffer.from(script, 'utf8').toString('base64');
+  return runOnVm(apiId, apiKey, vmId, `bash -c "echo ${b64} | base64 -d | bash"`, timeoutMs);
+}
+
+const NET_CHECK_SCRIPT = [
+  'echo "IPS: $(ip -4 -o addr show scope global 2>/dev/null | awk \'{print $4}\' | tr \'\\n\' \' \')"',
+  'R=$(ip route 2>/dev/null | grep "^default" | head -1); echo "ROUTE: ${R:-NONE}"',
+  'echo "NAMESERVERS: $(grep -E "^nameserver" /etc/resolv.conf 2>/dev/null | awk \'{print $2}\' | tr \'\\n\' \' \')"',
+  'getent hosts registry-1.docker.io >/dev/null 2>&1 && echo "DNS: OK" || echo "DNS: FAIL"',
+  'ping -c1 -W3 8.8.8.8 >/dev/null 2>&1 && echo "PING: OK" || echo "PING: FAIL"',
+  'if command -v curl >/dev/null 2>&1; then C=$(curl -s -o /dev/null -m 10 -w "%{http_code}" https://registry-1.docker.io/v2/ 2>/dev/null); echo "HTTPS: ${C:-000}"; else echo "HTTPS: NOCURL"; fi',
+].join('\n');
+
+// POST /api/cloudshare/vms/:vmId/check-network — can this VM reach the internet?
+router.post('/vms/:vmId/check-network', async (req, res) => {
+  const { apiId, apiKey } = req.body;
+  try {
+    const out = await runInline(apiId, apiKey, req.params.vmId, NET_CHECK_SCRIPT, 60000);
+    const get = (k) => ((out.stdout.match(new RegExp('^' + k + ':\\s*(.*)$', 'm')) || [])[1] || '').trim();
+    const ips = get('IPS'), route = get('ROUTE'), dns = get('DNS'), ping = get('PING'), https = get('HTTPS');
+    const httpsOk = /^[1-5]\d\d$/.test(https);           // any HTTP reply means we got out
+    const ok = httpsOk || (https === 'NOCURL' && dns === 'OK');
+    let reason = '';
+    if (!ok) {
+      if (!ips) reason = 'The VM has no IPv4 address — it is not connected to a network.';
+      else if (route === 'NONE') reason = 'The VM has no default route, so it has no way out to the internet. It is probably on a network without internet access.';
+      else if (ping === 'FAIL' && dns === 'FAIL') reason = 'The VM has an address and a route but cannot reach the internet (no ping to 8.8.8.8, no DNS). Outbound traffic is blocked for this VM.';
+      else if (dns === 'FAIL') reason = 'The VM reaches the internet by IP but DNS lookups fail. The test apps script can work around this by using public DNS.';
+      else reason = 'The VM cannot make HTTPS connections to the internet (HTTPS check returned ' + (https || 'nothing') + ').';
+    }
+    const dnsOnly = !ok && ping === 'OK' && dns === 'FAIL';
+    res.json({ ok, dnsOnly, reason, ips, route, nameservers: get('NAMESERVERS'), dns, ping, https, raw: out.stdout });
+  } catch (err) {
+    res.status(400).json({ error: csError(err) });
+  }
+});
+
+// PUT /api/cloudshare/vms/:vmId/hardware — resize CPU / RAM / disk
+router.put('/vms/:vmId/hardware', async (req, res) => {
+  const { apiId, apiKey, numCpus, memorySizeMBs, diskSizeGBs } = req.body;
+  const body = { vmId: req.params.vmId, numCpus, memorySizeMBs, diskSizeGBs };
+  try {
+    let result;
+    try {
+      result = await csPut(apiId, apiKey, '/api/v3/vms/actions/editvmhardware', body);
+    } catch (e) {
+      // CloudShare's docs show both spellings of this path
+      if (e.response?.status !== 404) throw e;
+      result = await csPut(apiId, apiKey, '/api/v3/vms/action/editvmhardware', body);
+    }
+    res.json(result || {});
+  } catch (err) {
+    res.status(400).json({ error: csError(err) });
+  }
+});
+
 // POST /api/cloudshare/vms/:vmId/run-setup — upload the App Scanner setup script and start it
 router.post('/vms/:vmId/run-setup', async (req, res) => {
   const { apiId, apiKey, provisioningKey, ssmParamName, region } = req.body;

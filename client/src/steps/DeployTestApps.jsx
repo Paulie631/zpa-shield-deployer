@@ -158,8 +158,13 @@ export default function DeployTestApps({ data, update, next, back }) {
           <div style={{ fontSize: 13, color: '#475569', margin: '4px 0 10px' }}>
             Installs Docker on the VM through the CloudShare API and starts DVWA (port 80) and Juice Shop (port 3000). Takes a few minutes while the images download.
           </div>
+          {data.csTestVmNetOk === false && runState === 'idle' && (
+            <div className="alert alert-error" style={{ marginBottom: 10 }}>
+              <span>❌ The network check showed <strong>{data.csTestVmName}</strong> has no internet access, so it can’t download Docker or the apps. Go back, delete that VM in CloudShare and add one from a different template.</span>
+            </div>
+          )}
           {(runState === 'idle' || runState === 'failed') && (
-            <button className="btn btn-primary" onClick={deployOnVm}>
+            <button className="btn btn-primary" onClick={deployOnVm} disabled={data.csTestVmNetOk === false && runState === 'idle'}>
               {runState === 'failed' ? '↻ Try again' : '🚀 Deploy Test Apps'}
             </button>
           )}
