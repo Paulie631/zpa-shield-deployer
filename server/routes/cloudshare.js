@@ -320,7 +320,8 @@ async function runOnVm(apiId, apiKey, vmId, command, timeoutMs = 45000) {
 // Upload `script` to the VM and start it as root in the background.
 // `stage` is updated as it goes so a failure can say where it stopped.
 async function uploadAndStart(apiId, apiKey, vmId, script, job, stage) {
-  const b64File = `/tmp/${job}.b64`, shFile = `/tmp/${job}.sh`, logFile = `/tmp/${job}.log`;
+  // Logs go under /var/log so they survive the scanner's reboot and /tmp cleanup
+  const b64File = `/tmp/${job}.b64`, shFile = `/tmp/${job}.sh`, logFile = `/var/log/zpa-shield-${job}.log`;
   const b64 = Buffer.from(script, 'utf8').toString('base64');
 
   // 1. Can we run commands, and as root?
@@ -352,7 +353,7 @@ async function uploadAndStart(apiId, apiKey, vmId, script, job, stage) {
   // 4. Start it detached so it survives this command returning
   stage.now = 'starting the script';
   await runOnVm(apiId, apiKey, vmId,
-    `bash -c "rm -f ${b64File}; ${sudo}setsid nohup bash ${shFile} > ${logFile} 2>&1 < /dev/null & echo STARTED"`);
+    `bash -c "rm -f ${b64File}; ${sudo}touch ${logFile}; ${sudo}chmod 644 ${logFile}; ${sudo}setsid nohup bash ${shFile} > ${logFile} 2>&1 < /dev/null & echo STARTED"`);
 
   return { started: true, runsAs: isRoot ? 'root' : 'sudo', logPath: logFile, job };
 }
@@ -526,7 +527,7 @@ router.get('/vms/:vmId/setup-log', async (req, res) => {
   const { apiId, apiKey } = req.query;
   const job = JOBS[req.query.job] ? req.query.job : 'zpa-setup';
   try {
-    const out = await runOnVm(apiId, apiKey, req.params.vmId, `bash -c "tail -n 60 /tmp/${job}.log 2>&1"`, 30000);
+    const out = await runOnVm(apiId, apiKey, req.params.vmId, `bash -c "tail -n 60 /var/log/zpa-shield-${job}.log 2>/dev/null || tail -n 60 /tmp/${job}.log 2>&1"`, 30000);
     res.json({ log: out.stdout, done: out.stdout.includes(JOBS[job].done), failed: out.stdout.includes(FAIL_MARKER) });
   } catch (err) {
     // Expected for zpa-setup once the script reboots the VM at the end

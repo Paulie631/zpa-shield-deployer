@@ -59,48 +59,8 @@ export default function ScanConfig({ data, update, next, back }) {
       .catch(e => setNetNote('⚠️ Couldn’t check the AWS network rules: ' + (e.response?.data?.error || e.message)))
   }, [])
 
-  // ── Create app segments for the test apps via the ZPA API ──
   const testIp = data.testAppsPrivateIp
   const testSegsExist = segments.some(s => (s.domainNames || []).includes(testIp))
-  const [groups, setGroups] = useState(null)
-  const [segGroupId, setSegGroupId] = useState('')
-  const [creatingSegs, setCreatingSegs] = useState(false)
-  const [segSteps, setSegSteps] = useState([])
-  const [createSegError, setCreateSegError] = useState('')
-  useEffect(() => {
-    if (!testIp) return
-    axios.get('/api/zpa/connector-groups', { params: zpaAuth(data) }).then(r => {
-      const list = r.data || []
-      setGroups(list)
-      // Prefer a group other than the dedicated scanner group, if there is one
-      const other = list.find(g => g.id !== data.connectorGroupId)
-      setSegGroupId((other || list.find(g => g.id === data.connectorGroupId) || {}).id || '')
-    }).catch(e => { setGroups([]); setCreateSegError('Couldn’t load App Connector groups: ' + (e.response?.data?.error || e.message)) })
-  }, [testIp])
-
-  const createTestSegments = async () => {
-    setCreatingSegs(true); setCreateSegError(''); setSegSteps([])
-    try {
-      const r = await axios.post('/api/zpa/test-app-segments', { ...zpaAuth(data), ip: testIp, connectorGroupId: segGroupId })
-      setSegSteps(r.data.steps || [])
-      await loadSegments()
-      setSelectedSegments(prev => [...new Set([...prev, ...(r.data.segments || []).map(s => s.id)])])
-    } catch (e) { setCreateSegError(e.response?.data?.error || e.message) }
-    finally { setCreatingSegs(false) }
-  }
-  const [selectedSegments, setSelectedSegments] = useState(data.selectedSegmentIds || [])
-  const [probingLevel, setProbingLevel] = useState(data.probingLevel || 'MEDIUM')
-  const [frequency, setFrequency] = useState(data.frequency || 'WEEKLY')
-  const [startTime, setStartTime] = useState(data.startTime || '02:00')
-  const [scanName, setScanName] = useState(data.scanName || 'Shield Scan')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  const toggleSegment = (id) => {
-    setSelectedSegments(prev =>
-      prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
-    )
-  }
 
   const createScan = async () => {
     setLoading(true)
@@ -138,28 +98,9 @@ export default function ScanConfig({ data, update, next, back }) {
       {netNote && <div className="hint" style={{ marginBottom: 12 }}>{netNote}</div>}
 
       {testIp && !testSegsExist && !loadingSegs && (
-        <div style={{ marginBottom: 16, padding: 14, border: '1px solid #bfdbfe', borderRadius: 8, background: '#eff6ff' }}>
-          <strong>Create app segments for the test apps</strong>
-          <div style={{ fontSize: 13, color: '#475569', margin: '4px 0 10px' }}>
-            Creates a segment group, a server group and two app segments — DVWA ({testIp}:80) and Juice Shop ({testIp}:3000) — through the ZPA API, then selects them below.
-          </div>
-          <label style={{ fontSize: 13 }}>App Connector group that can reach {testIp}</label>
-          <select value={segGroupId} onChange={e => setSegGroupId(e.target.value)} style={{ marginBottom: 6 }}>
-            {groups === null && <option value="">Loading connector groups...</option>}
-            {groups && groups.length === 0 && <option value="">No App Connector groups found — create one on the ZPA Setup step</option>}
-            {(groups || []).map(g => <option key={g.id} value={g.id}>{g.name}{g.id === data.connectorGroupId ? ' (App Scanner group)' : ''}</option>)}
-          </select>
-          {segGroupId && segGroupId === data.connectorGroupId && (
-            <div className="hint" style={{ color: '#b45309' }}>This is the App Scanner group. Zscaler recommends keeping that group dedicated to scanning; pick a traffic-forwarding group in the same network if you have one.</div>
-          )}
-          <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={createTestSegments} disabled={creatingSegs || !segGroupId}>
-            {creatingSegs ? <><span className="spinner" /> Creating...</> : '➕ Create Test App Segments'}
-          </button>
-          {createSegError && <div className="alert alert-error" style={{ marginTop: 10 }}><span>⚠️ {createSegError}</span></div>}
+        <div className="alert alert-warning" style={{ marginBottom: 12 }}>
+          <span>⚠️ No app segments for the test apps at {testIp} yet — go back to <strong>Publish</strong> to create them, then <button onClick={loadSegments} style={{ fontSize: 12 }}>↻ Reload</button></span>
         </div>
-      )}
-      {segSteps.length > 0 && (
-        <div className="alert alert-success" style={{ display: 'block' }}>{segSteps.map((s, i) => <div key={i}>✅ {s}</div>)}</div>
       )}
 
       <div className="form-group">

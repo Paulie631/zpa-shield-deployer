@@ -113,8 +113,10 @@ function generateSetupScript({ ssmParamName, provisioningKey, region }) {
     'echo " 2. Enable Application Shield Scanning on this connector"',
     'echo " 3. Verify connector shows healthy"',
     'echo "=============================================="',
-    'echo "=== Rebooting in 10 seconds ==="',
+    'echo "=== Rebooting in 10 seconds (required after the connector install) ==="',
+    'echo "This log is kept at /var/log/zpa-shield-zpa-setup.log on the VM"',
     'sleep 10',
+    'sync',
     'reboot',
   ]
 

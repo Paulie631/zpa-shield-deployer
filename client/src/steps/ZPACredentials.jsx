@@ -58,7 +58,8 @@ function saveCreds(obj) {
 
 export default function ZPACredentials({ data, update, next }) {
   const saved = loadSaved()
-  const [authMode, setAuthMode] = useState(data.authMode || saved.authMode || 'apikey')
+  const [authMode, setAuthMode] = useState(data.authMode || saved.authMode || 'oneapi')
+  const [showLegacy, setShowLegacy] = useState((data.authMode || saved.authMode || 'oneapi') !== 'oneapi')
   const [tenantUrl, setTenantUrl] = useState(data.tenantUrl || saved.tenantUrl || '')
   const [apiKey, setApiKey] = useState(data.apiKey || saved.apiKey || '')
   const [clientId, setClientId] = useState(data.clientId || saved.clientId || '')
@@ -153,9 +154,11 @@ export default function ZPACredentials({ data, update, next }) {
         <label>How do you want to authenticate?</label>
         <div className="auth-mode-cards">
           {[
-            { id: 'apikey', icon: '🔑', label: 'API Key', sub: 'Most common' },
-            { id: 'oauth',  icon: '🔐', label: 'OAuth 2.0', sub: 'Client credentials' },
-            { id: 'oneapi', icon: '🌐', label: 'OneAPI', sub: 'Zidentity / api.zscaler.com' },
+            { id: 'oneapi', icon: '🌐', label: 'OneAPI', sub: 'Zidentity API client — recommended' },
+            ...(showLegacy ? [
+              { id: 'apikey', icon: '🔑', label: 'API Key (legacy)', sub: 'Untested — may not work' },
+              { id: 'oauth',  icon: '🔐', label: 'OAuth 2.0 (legacy)', sub: 'Untested — may not work' },
+            ] : []),
           ].map(m => (
             <div
               key={m.id}
@@ -170,6 +173,14 @@ export default function ZPACredentials({ data, update, next }) {
             </div>
           ))}
         </div>
+        {!showLegacy && (
+          <button onClick={() => setShowLegacy(true)} style={{ fontSize: 12, background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px 0', textDecoration: 'underline' }}>
+            Tenant not on Zidentity? Show legacy API Key / OAuth options
+          </button>
+        )}
+        {showLegacy && authMode !== 'oneapi' && (
+          <div className="alert alert-warning" style={{ marginTop: 8 }}><span>⚠️ The legacy modes haven’t been exercised end to end by this wizard. If your tenant uses Zidentity (most do now), use OneAPI.</span></div>
+        )}
       </div>
 
       {/* Tenant URL — not needed for OneAPI */}
