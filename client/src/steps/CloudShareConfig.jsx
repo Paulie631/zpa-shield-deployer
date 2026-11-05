@@ -377,7 +377,8 @@ export default function CloudShareConfig({ data, update, next, back }) {
                 {/* App Scanner VM: spec + prebuilt-image warnings, add a plain RHEL 9 VM */}
                 {selectedVmDetail && (scannerIsPrebuilt || scannerUnderSpec) && (
                   <div className="alert alert-warning" style={{ marginBottom: '12px', display: 'block' }}>
-                    {scannerIsPrebuilt && <div>⚠️ <strong>{selectedVmDetail.name}</strong> looks like Zscaler’s prebuilt App Connector image. App Shield’s scanner needs a <strong>plain RHEL 9</strong> VM (RPM install) — add one below.</div>}
+                    {scannerIsPrebuilt && <div>⚠️ <strong>{selectedVmDetail.name}</strong> looks like Zscaler’s prebuilt App Connector image. App Shield’s scanner needs a <strong>plain RHEL 9</strong> VM (RPM install) — add one below.
+                      <div style={{ marginTop: 6 }}>💡 This VM is still useful: use it for the <strong>test apps</strong>. Add the RHEL 9 VM, keep that one selected here as the scanner, then pick <strong>{selectedVmDetail.name}</strong> under “VM for test apps”.</div></div>}
                     {scannerUnderSpec && <div style={{ marginTop: scannerIsPrebuilt ? 6 : 0 }}>⚠️ This VM is {selectedVmDetail.cpuCount} vCPU / {Math.round((selectedVmDetail.memorySizeMb || 0) / 1024)} GB RAM / {selectedVmDetail.diskSizeGb} GB disk. The App Scanner needs {SCANNER_SPEC.numCpus} vCPU / {SCANNER_SPEC.memorySizeMBs / 1024} GB RAM / 120 GB free in /var.
                       {!scannerIsPrebuilt && (
                         <button onClick={resizeScanner} disabled={resizing} style={{ marginLeft: 8, fontSize: 12, padding: '2px 8px', border: '1px solid #d97706', borderRadius: 4, background: '#fff', cursor: 'pointer' }}>
@@ -397,6 +398,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
                   <div style={{ marginBottom: '12px' }}>
                     <AddVmPanel apiId={apiId} apiKey={apiKey} envId={selectedEnv} regionId={envDetail.regionId}
                       existingVmIds={(envDetail.vms || []).map(v => v.id)}
+                      existingVmNames={(envDetail.vms || []).map(v => v.name)}
                       rank={rankScannerTemplate} preferredName={PREFERRED_SCANNER_TEMPLATE}
                       knownGood={{ projectId: PROJECT_ID, blueprintId: BP_APP_SCANNER, rank: -20, label: 'App Connector Base — prebuilt connector image, has internet' }}
                       title="Add a plain RHEL 9 VM for the App Scanner" vmName="App Scanner RHEL9"
@@ -485,6 +487,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
                     ) : (
                       <AddVmPanel apiId={apiId} apiKey={apiKey} envId={selectedEnv} regionId={envDetail.regionId}
                         existingVmIds={(envDetail.vms || []).map(v => v.id)}
+                        existingVmNames={(envDetail.vms || []).map(v => v.name)}
                         rank={rankTemplate} preferredName={PREFERRED_TESTAPPS_TEMPLATE}
                         knownGood={{ projectId: PROJECT_ID, blueprintId: BP_APP_SCANNER, rank: 1000, label: 'App Connector Base — same image as your working VM' }}
                         title="Add a Linux VM for the test apps" vmName="ZPA Test Apps"

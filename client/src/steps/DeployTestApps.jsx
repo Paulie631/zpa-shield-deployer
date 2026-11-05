@@ -182,10 +182,12 @@ export default function DeployTestApps({ data, update, next, back }) {
         <div className="alert alert-warning">
           ⚠️ {canRunRemote ? 'To do it by hand instead, run these on the test apps VM (RHEL-family shown):' : 'No test apps VM was selected. To set them up yourself, run these on a second Linux VM (RHEL-family shown), or go back and pick a VM:'}
           <pre style={{ marginTop: 8, background: '#1e293b', color: '#e2e8f0', padding: '10px', borderRadius: '6px', fontSize: '12px' }}>
-{`sudo dnf install -y docker
-sudo systemctl start docker && sudo systemctl enable docker
-sudo docker run -d --name dvwa -p 80:80 vulnerables/web-dvwa
-sudo docker run -d --name juiceshop -p 3000:3000 bkimminich/juice-shop`}
+{`sudo dnf install -y yum-utils
+sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io
+sudo systemctl enable --now docker
+sudo docker run -d --restart unless-stopped --name dvwa -p 80:80 vulnerables/web-dvwa
+sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimminich/juice-shop`}
           </pre>
         </div>
       )}

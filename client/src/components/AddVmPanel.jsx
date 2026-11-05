@@ -4,7 +4,7 @@ import axios from 'axios'
 // Adds a VM from a CloudShare template to an environment, waits for it to start,
 // then optionally resizes it. `rank(name)` orders templates (higher is better, < 0 = not recommended).
 // `knownGood` = { projectId, blueprintId, rank, label } adds that blueprint's machine(s) to the list.
-export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmIds, rank, title, vmName,
+export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmIds, existingVmNames = [], rank, title, vmName,
   preferredName, recommendedText, noneText, resize, knownGood, onAdded, onCancel }) {
   const [templates, setTemplates] = useState(null)
   const [templateId, setTemplateId] = useState('')
@@ -18,7 +18,8 @@ export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmI
   useEffect(() => {
     const fromBlueprint = knownGood
       ? axios.get('/api/cloudshare/blueprint-machines', { params: { apiId, apiKey, projectId: knownGood.projectId, blueprintId: knownGood.blueprintId } })
-          .then(r => (r.data || []).map(m => ({ id: 'bp:' + m.machineId, machineId: m.machineId, knownGood: true,
+          // A blueprint machine has a fixed IP, so CloudShare refuses a second copy in the same environment
+          .then(r => (r.data || []).filter(m => !existingVmNames.includes(m.name)).map(m => ({ id: 'bp:' + m.machineId, machineId: m.machineId, knownGood: true,
             name: `${knownGood.label} (${m.name})`, resources: m.resources, rank: knownGood.rank })))
           .catch(() => [])
       : Promise.resolve([])
@@ -73,7 +74,10 @@ export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmI
       }, 8000)
     } catch (err) {
       setBusy(false); setStatus('')
-      setError(err.response?.data?.error || err.message || 'Failed to add VM')
+      const msg = err.response?.data?.error || err.message || 'Failed to add VM'
+      setError(/same IP address/i.test(msg)
+        ? `${msg}. This environment already has a copy of that machine — use the existing one instead of adding another.`
+        : msg)
     }
   }
 

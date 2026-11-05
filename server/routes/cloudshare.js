@@ -280,14 +280,23 @@ async function runOnVm(apiId, apiKey, vmId, command, timeoutMs = 45000) {
   if (!executionId) throw new Error('CloudShare did not return an executionId: ' + JSON.stringify(started));
   const q = `/api/v3/vms/actions/checkexecutionstatus?vmId=${encodeURIComponent(vmId)}&executionId=${encodeURIComponent(executionId)}`;
   const deadline = Date.now() + timeoutMs;
+  let last = null;
   while (Date.now() < deadline) {
     await sleep(2000);
     const st = await csGet(apiId, apiKey, q);
+    last = st;
     if (st && st.success) {
       return { stdout: st.standardOutput || '', stderr: st.standardError || '', raw: st };
     }
+    // CloudShare only sets success=true for a clean finish; a non-zero exit code means it finished and failed
+    if (st && typeof st.exitCode === 'number' && st.exitCode !== 0) {
+      const detail = (st.standardError || st.standardOutput || '').trim().slice(0, 300);
+      throw new Error(`Command failed on the VM (exit code ${st.exitCode})${detail ? ': ' + detail : ''}`);
+    }
   }
-  throw new Error(`Timed out waiting for the VM to run: ${command.slice(0, 60)}...`);
+  const seen = last ? Object.entries(last).filter(([k, v]) => v !== null && v !== '' && k !== 'executedPath')
+    .map(([k, v]) => `${k}=${String(v).slice(0, 80)}`).join(', ') : 'no status returned';
+  throw new Error(`CloudShare never reported the command as finished after ${Math.round(timeoutMs / 1000)}s (last status: ${seen || 'empty'}). CloudShare may not be able to run commands on this VM — its guest tools may be missing or its OS login may differ from what CloudShare has on file.`);
 }
 
 // Upload `script` to the VM and start it as root in the background.
