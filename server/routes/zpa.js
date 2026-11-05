@@ -302,6 +302,57 @@ router.post('/test-apps-access-rule', async (req, res) => {
   }
 });
 
+// POST /api/zpa/verify-publish — check the published pieces: traffic connector(s) online,
+// both app segments enabled and pointing at the test apps, access rule present.
+router.post('/verify-publish', async (req, res) => {
+  const { ip } = req.body;
+  let stage = 'connecting to ZPA';
+  try {
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    const checks = [];
+
+    stage = 'checking the traffic connector';
+    const group = await findByName(base, headers, 'appConnectorGroup', TRAFFIC_GROUP);
+    if (!group) {
+      checks.push({ id: 'connector', ok: false, label: 'Traffic App Connector online', detail: `Connector group "${TRAFFIC_GROUP}" doesn't exist yet — run Publish Apps` });
+    } else {
+      const conns = [];
+      for (let page = 1; page <= 10; page++) {
+        const r = await axios.get(`${base}/connector`, { headers, params: { page, pagesize: 500 }, timeout: 15000 });
+        conns.push(...(r.data.list || []));
+        if (page >= (parseInt(r.data.totalPages, 10) || 1)) break;
+      }
+      const mine = conns.filter(c => c.appConnectorGroupId === group.id || c.appConnectorGroupName === TRAFFIC_GROUP);
+      const online = mine.filter(c => /AUTHENTICATED|CONNECTED|ONLINE/i.test(c.controlChannelStatus || ''));
+      checks.push({
+        id: 'connector', ok: online.length > 0, label: 'Traffic App Connector online',
+        detail: mine.length === 0
+          ? `No connector has enrolled in "${TRAFFIC_GROUP}" yet. A new connector takes about 5–10 minutes after its VM starts.`
+          : mine.map(c => `${c.name}: ${c.controlChannelStatus || 'unknown'}${c.privateIp ? ' (' + c.privateIp + ')' : ''}`).join('; '),
+      });
+    }
+
+    stage = 'checking the app segments';
+    for (const app of TEST_APPS) {
+      const seg = await findByName(base, headers, 'application', app.name);
+      const pointsAtApp = seg && (!ip || (seg.domainNames || []).includes(ip));
+      checks.push({
+        id: 'seg-' + app.port, ok: !!(seg && seg.enabled !== false && pointsAtApp), label: `App segment "${app.name}"`,
+        detail: !seg ? 'Not found — run Publish Apps' : seg.enabled === false ? 'Exists but is disabled'
+          : !pointsAtApp ? `Points at ${(seg.domainNames || []).join(', ')}, not ${ip}` : `${(seg.domainNames || []).join(', ')} : ${app.port}`,
+      });
+    }
+
+    stage = 'checking the access rule';
+    const rule = await findByName(base, headers, 'policySet/rules/policyType/ACCESS_POLICY', ACCESS_RULE);
+    checks.push({ id: 'rule', ok: !!rule, label: `Access rule "${ACCESS_RULE}"`, detail: rule ? 'Present' : 'Not found — run Publish Apps' });
+
+    res.json({ checks, allOk: checks.every(c => c.ok) });
+  } catch (err) {
+    res.status(400).json({ error: `Failed while ${stage}: ${zpaError(err)}` });
+  }
+});
+
 router.post('/test-app-segments', async (req, res) => {
   const { ip, connectorGroupId } = req.body;
   let stage = 'connecting to ZPA';

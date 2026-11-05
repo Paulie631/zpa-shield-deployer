@@ -17,13 +17,14 @@ A 9-step guided wizard that automates the full ZPA App Shield deployment:
 | 1 | Connect to your ZPA tenant (OneAPI/Zidentity, API key or OAuth) |
 | 2 | Choose AWS or CloudShare |
 | 3 | Configure your AWS environment (VPC, subnet, key pair; session token for temporary keys) or pick your CloudShare VMs |
-| 4 | Deploy DVWA + OWASP Juice Shop as vulnerable test targets |
-| 5 | Create or pick the ZPA connector group + provisioning key for the App Scanner |
-| 6 | **AWS:** launch the App Scanner via CloudFormation · **CloudShare:** run the setup script on the VM |
-| 7 | **Publish the test apps through ZPA:** a traffic App Connector (AWS), app segments for both apps, and an access policy rule |
-| 8 | Configure the scan (ZPA has no scan API, so the scan itself is created in the portal) |
-| 9 | Manual ZPA portal checklist with deep links |
-| 10 | Summary + links |
+| 4 | Deploy DVWA + OWASP Juice Shop as vulnerable test apps |
+| 5 | **Publish them through ZPA:** a traffic App Connector (deployed on AWS), app segments for both apps, and an access policy rule |
+| 6 | **Verify access:** ZPA-side checks (connector online, segments, rule), then a CloudShare VM with Zscaler Client Connector opens both apps, plus a manual check |
+| 7 | Create or pick the App Scanner's connector group + provisioning key |
+| 8 | **AWS:** launch the App Scanner via CloudFormation · **CloudShare:** run the setup script on the VM |
+| 9 | Configure the scan (ZPA has no scan API, so the scan itself is created in the portal) |
+| 10 | Manual ZPA portal checklist with deep links |
+| 11 | Summary + links |
 
 ---
 

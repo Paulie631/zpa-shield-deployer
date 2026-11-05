@@ -42,7 +42,7 @@ body {
   align-items: center;
   gap: 6px;
   flex: 1;
-  min-width: 80px;
+  min-width: 60px;
   position: relative;
 }
 .progress-step:not(:last-child)::after {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
-import { zpaAuth, zpaPortalBase } from '../lib/zpa'
+import { zpaAuth, zpaPortalBase, savedCustomerId, rememberCustomerId } from '../lib/zpa'
 
 // Publish the test apps through ZPA:
 //   1. a traffic-forwarding App Connector in the VPC (AWS), in its own connector group
@@ -12,6 +12,10 @@ const TRAFFIC_STACK = 'zpa-traffic-connector'
 export default function PublishApps({ data, update, next, back }) {
   const isAWS = data.target === 'aws'
   const ip = data.testAppsPrivateIp
+  // OneAPI needs the numeric ZPA customer ID; this step can come before ZPA Setup, so ask here if unknown
+  const [cid, setCid] = useState(data.customerId || savedCustomerId(data))
+  const needsCid = data.authMode === 'oneapi' && !/^\d+$/.test(cid || '')
+  const setCustomerId = (v) => { setCid(v); if (/^\d+$/.test(v)) { update({ customerId: v }); rememberCustomerId(data, v) } }
   const aws = { accessKeyId: data.accessKeyId, secretAccessKey: data.secretAccessKey, sessionToken: data.sessionToken, region: data.region }
 
   // per-part state: { state: 'idle'|'running'|'done'|'error', lines: [], error }
@@ -58,7 +62,8 @@ export default function PublishApps({ data, update, next, back }) {
         pollRef.current = setInterval(pollStack, 8000)
         pollStack()
       }
-      setConn({ state: 'done', lines, groupId: z.data.groupId })
+      if (!isAWS) lines.push('No VM is deployed for it on CloudShare: enroll an App Connector that can reach the test apps using the provisioning key below')
+      setConn({ state: 'done', lines, groupId: z.data.groupId, key: isAWS ? undefined : z.data.provisioningKey })
       return z.data.groupId
     } catch (e) { setConn({ state: 'error', lines: [], error: errOf(e) }); throw e }
   }
@@ -68,7 +73,7 @@ export default function PublishApps({ data, update, next, back }) {
     setSegs({ state: 'running', lines: [] })
     try {
       const r = await axios.post('/api/zpa/test-app-segments', {
-        ...zpaAuth(data), ip, connectorGroupId: groupId || data.trafficGroupId || data.connectorGroupId,
+        ...zpaAuth(data), ip, connectorGroupId: groupId || data.trafficGroupId,
       })
       setSegs({ state: 'done', lines: r.data.steps || [] })
       update({ selectedSegmentIds: (r.data.segments || []).map(s => s.id) })
@@ -87,7 +92,7 @@ export default function PublishApps({ data, update, next, back }) {
   const publishAll = async () => {
     setRunning(true)
     try {
-      const groupId = isAWS ? await doConnector() : null
+      const groupId = await doConnector()
       await doSegments(groupId)
       await doRule()
     } catch { /* the failing part shows its own error */ }
@@ -120,7 +125,7 @@ export default function PublishApps({ data, update, next, back }) {
     </div>
   )
 
-  const allDone = segs.state === 'done' && rule.state === 'done' && (!isAWS || conn.state === 'done')
+  const allDone = segs.state === 'done' && rule.state === 'done' && conn.state === 'done'
 
   return (
     <div className="card">
@@ -130,19 +135,27 @@ export default function PublishApps({ data, update, next, back }) {
       </p>
 
       {!ip && <div className="alert alert-warning"><span>⚠️ No test apps address yet — deploy the test apps first, or skip this step.</span></div>}
-
-      {isAWS ? (
-        <Part n={1} title="Traffic App Connector" part={conn} onRetry={() => doConnector().catch(() => {})}
-          desc={<>An ordinary App Connector in your VPC, in its own group (“ZPA Shield Traffic Connectors”), so the App Scanner group stays dedicated to scanning.</>}
-          extra={stackBox} />
-      ) : (
-        <div className="alert alert-info" style={{ marginBottom: 12 }}>
-          <span>ℹ️ On CloudShare the wizard doesn’t deploy a separate traffic connector yet, so the app segments use your App Scanner connector group.</span>
+      {data.authMode === 'oneapi' && (needsCid || !data.customerId) && (
+        <div className="form-group">
+          <label>ZPA Customer ID</label>
+          <input value={cid} placeholder="e.g. 216196257331281920" onChange={e => setCustomerId(e.target.value.trim())} />
+          <div className="hint">The numeric ZPA tenant ID (ZPA console → Configuration &amp; Control → Public API → API Keys) — not the Zidentity tenant ID.</div>
         </div>
       )}
-      <Part n={isAWS ? 2 : 1} title="App segments" part={segs} onRetry={() => doSegments().catch(() => {})}
+
+      <Part n={1} title="Traffic App Connector" part={conn} onRetry={() => doConnector().catch(() => {})}
+        desc={isAWS
+          ? <>An ordinary App Connector in your VPC, in its own group (“ZPA Shield Traffic Connectors”), so the App Scanner group stays dedicated to scanning.</>
+          : <>A connector group (“ZPA Shield Traffic Connectors”) and provisioning key for an App Connector that can reach the test apps.</>}
+        extra={isAWS ? stackBox : (conn.key && (
+          <div style={{ margin: '8px 0 0 24px' }}>
+            <div className="hint">Provisioning key — keep it private:</div>
+            <pre style={{ background: '#0f172a', color: '#e2e8f0', padding: 8, borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{conn.key}</pre>
+          </div>
+        ))} />
+      <Part n={2} title="App segments" part={segs} onRetry={() => doSegments().catch(() => {})}
         desc={<>“ZPA Shield - DVWA” ({ip || '?'}:80) and “ZPA Shield - Juice Shop” ({ip || '?'}:3000), in segment group “ZPA Shield Test Apps”.</>} />
-      <Part n={isAWS ? 3 : 2} title="Access policy rule" part={rule} onRetry={() => doRule().catch(() => {})}
+      <Part n={3} title="Access policy rule" part={rule} onRetry={() => doRule().catch(() => {})}
         desc={<>“ZPA Shield - allow test apps” — lets users reach the ZPA Shield Test Apps segment group. It applies to all users; narrow it to a group in the <a href={zpaPortalBase(data)} target="_blank" rel="noreferrer">ZPA Admin Portal</a> if you like.</>} />
 
       {allDone && (
@@ -157,9 +170,9 @@ export default function PublishApps({ data, update, next, back }) {
           <button className="btn btn-secondary" onClick={next} disabled={running}>Skip →</button>
         )}
         {allDone ? (
-          <button className="btn btn-primary" onClick={next}>Continue →</button>
+          <button className="btn btn-primary" onClick={next}>Continue to Verify Access →</button>
         ) : (
-          <button className="btn btn-primary" onClick={publishAll} disabled={running || !ip}>
+          <button className="btn btn-primary" onClick={publishAll} disabled={running || !ip || needsCid}>
             {running ? <><span className="spinner" /> Publishing...</> : '🚀 Publish Test Apps'}
           </button>
         )}

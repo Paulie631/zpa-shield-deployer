@@ -11,6 +11,7 @@ import ScanConfig from './steps/ScanConfig'
 import PortalSteps from './steps/PortalSteps'
 import Done from './steps/Done'
 import PublishApps from './steps/PublishApps'
+import VerifyAccess from './steps/VerifyAccess'
 
 // Progress survives page refreshes (like the one after installing an update) but not
 // closing the tab: sessionStorage is per-tab and cleared when the tab closes.
@@ -19,13 +20,24 @@ function loadProgress() {
   try { return JSON.parse(sessionStorage.getItem(PROGRESS_KEY)) || {} } catch { return {} }
 }
 
+// Steps are identified by name so reordering the wizard in an update can't drop
+// someone on the wrong step. ORDER is the flow; the two infra/scanner steps depend on target.
+const ORDER = ['creds', 'target', 'infra', 'testapps', 'publish', 'verify', 'zpasetup', 'scanner', 'scan', 'portal', 'done']
+// Layout before v1.3.36 (progress was saved by position), to map old saved progress
+const OLD_ORDER = ['creds', 'target', 'infra', 'testapps', 'zpasetup', 'scanner', 'publish', 'scan', 'portal', 'done']
+function savedStepIndex(saved) {
+  if (saved.stepName && ORDER.includes(saved.stepName)) return ORDER.indexOf(saved.stepName)
+  if (Number.isInteger(saved.step) && OLD_ORDER[saved.step]) return ORDER.indexOf(OLD_ORDER[saved.step])
+  return 0
+}
+
 export default function App() {
   const saved = loadProgress()
-  const [step, setStep] = useState(Number.isInteger(saved.step) ? saved.step : 0)
+  const [step, setStep] = useState(savedStepIndex(saved))
   const [data, setData] = useState(saved.data || {})
 
   useEffect(() => {
-    try { sessionStorage.setItem(PROGRESS_KEY, JSON.stringify({ step, data })) } catch {}
+    try { sessionStorage.setItem(PROGRESS_KEY, JSON.stringify({ stepName: ORDER[step], data })) } catch {}
   }, [step, data])
 
   const startOver = () => {
@@ -43,16 +55,18 @@ export default function App() {
   const isAWS = data.target === 'aws'
   const isCloudShare = data.target === 'cloudshare'
 
+  // Short labels: eleven steps have to fit across the progress bar
   const steps = [
-    'ZPA Credentials',
-    'Choose Target',
-    isAWS ? 'AWS Config' : 'CloudShare VMs',
-    'Deploy Test Apps',
-    'ZPA Setup',
-    isAWS ? 'Deploy Scanner' : 'Setup Script',
-    'Publish Apps',
-    'Configure Scan',
-    'Portal Steps',
+    'ZPA Login',
+    'Target',
+    isAWS ? 'AWS' : 'CloudShare',
+    'Test Apps',
+    'Publish',
+    'Verify',
+    'Scanner Key',
+    isAWS ? 'Scanner' : 'Scanner Script',
+    'Scan',
+    'Portal',
     'Done'
   ]
 
@@ -63,14 +77,16 @@ export default function App() {
       case 2: return isAWS
         ? <AWSConfig data={data} update={update} next={next} back={back} />
         : <CloudShareConfig data={data} update={update} next={next} back={back} />
-      // Test apps first: they need nothing from ZPA, and ZPA setup needs their address
+      // Apps first: deploy them, publish them through ZPA and prove access works,
+      // then add the App Scanner and scan
       case 3: return <DeployTestApps data={data} update={update} next={next} back={back} />
-      case 4: return <ZPASetup data={data} update={update} next={next} back={back} />
-      case 5: return <DeployScanner data={data} update={update} next={next} back={back} isCloudShare={isCloudShare} />
-      case 6: return <PublishApps data={data} update={update} next={next} back={back} />
-      case 7: return <ScanConfig data={data} update={update} next={next} back={back} />
-      case 8: return <PortalSteps data={data} update={update} next={next} back={back} />
-      case 9: return <Done data={data} goTo={goTo} />
+      case 4: return <PublishApps data={data} update={update} next={next} back={back} />
+      case 5: return <VerifyAccess data={data} update={update} next={next} back={back} />
+      case 6: return <ZPASetup data={data} update={update} next={next} back={back} />
+      case 7: return <DeployScanner data={data} update={update} next={next} back={back} isCloudShare={isCloudShare} />
+      case 8: return <ScanConfig data={data} update={update} next={next} back={back} />
+      case 9: return <PortalSteps data={data} update={update} next={next} back={back} />
+      case 10: return <Done data={data} goTo={goTo} />
       default: return null
     }
   }

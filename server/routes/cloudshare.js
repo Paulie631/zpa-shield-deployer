@@ -388,6 +388,48 @@ async function editHardware(apiId, apiKey, body) {
   }
 }
 
+// POST /api/cloudshare/vms/:vmId/check-apps — from a client VM (with Zscaler Client Connector),
+// request each URL and report the HTTP status. Any HTTP reply means the app was reached.
+router.post('/vms/:vmId/check-apps', async (req, res) => {
+  const { apiId, apiKey, urls = [] } = req.body;
+  const clean = urls.filter(u => /^https?:\/\/[0-9a-zA-Z.\-:]+\/?$/.test(u));
+  if (!clean.length) return res.status(400).json({ error: 'No valid URLs to check' });
+  const parse = (out) => {
+    const results = clean.map(u => {
+      const m = out.match(new RegExp('^URL ' + u.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') + ' -> (.*)$', 'm'));
+      const v = m ? m[1].trim() : 'no result';
+      return { url: u, result: v, ok: /^[1-5]\d\d$/.test(v) };
+    });
+    const zcc = (out.match(/^ZCC: (.*)$/m) || [])[1] || '';
+    return { results, zcc: zcc.trim(), raw: out };
+  };
+  try {
+    // Windows: PowerShell via -EncodedCommand (UTF-16LE base64) so nothing needs quoting
+    const ps = [
+      "$ErrorActionPreference = 'SilentlyContinue'",
+      "$svc = Get-Service | Where-Object { $_.DisplayName -like '*Zscaler*' } | ForEach-Object { $_.DisplayName + '=' + $_.Status }",
+      "'ZCC: ' + ($svc -join '; ')",
+      `foreach ($u in @(${clean.map(u => `'${u}'`).join(',')})) {`,
+      "  try { $r = Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 20 -MaximumRedirection 0; 'URL ' + $u + ' -> ' + $r.StatusCode }",
+      "  catch { $c = $_.Exception.Response.StatusCode.value__; if ($c) { 'URL ' + $u + ' -> ' + $c } else { 'URL ' + $u + ' -> ERROR ' + $_.Exception.Message } }",
+      "}",
+    ].join('\n');
+    const enc = Buffer.from(ps, 'utf16le').toString('base64');
+    try {
+      const out = await runOnVm(apiId, apiKey, req.params.vmId, `powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${enc}`, 120000);
+      if (/^URL /m.test(out.stdout)) return res.json({ os: 'windows', ...parse(out.stdout) });
+    } catch (e) { /* not Windows (or PowerShell unavailable) — try Linux */ }
+    const sh = [
+      'echo "ZCC: $(systemctl is-active zsaservice 2>/dev/null || pgrep -fl -i zscaler | head -1 || echo not found)"',
+      ...clean.map(u => `echo "URL ${u} -> $(curl -s -o /dev/null -m 20 -w '%{http_code}' '${u}' || echo ERROR)"`),
+    ].join('\n');
+    const out = await runInline(apiId, apiKey, req.params.vmId, sh, 120000);
+    res.json({ os: 'linux', ...parse(out.stdout) });
+  } catch (err) {
+    res.status(400).json({ error: csError(err) });
+  }
+});
+
 // PUT /api/cloudshare/vms/:vmId/hardware — resize CPU / RAM / disk.
 // CloudShare product tiers cap VM sizes, so step down whichever resource the
 // error names until CloudShare accepts it, and report what was applied.
