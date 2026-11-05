@@ -31,19 +31,36 @@ async function getOneApiToken(clientId, clientSecret, vanityDomain) {
   return res.data.access_token;
 }
 
-// Get a legacy ZPA token via config.{zpaCloud}/signin (used by config.zpatwo.net etc.)
-async function getZpaLegacyToken(clientId, clientSecret, zpaHost) {
-  const signinUrl = zpaHost + '/signin';
-  console.log('[getZpaLegacyToken] POST', signinUrl);
-  const params = new URLSearchParams({ client_id: clientId, client_secret: clientSecret });
-  const r = await axios.post(signinUrl, params.toString(), {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-    timeout: 10000,
-  });
-  const token = r.data.token || r.data.access_token || r.data.Bearer;
-  if (!token) throw new Error('ZPA signin returned no token: ' + JSON.stringify(r.data));
-  console.log('[getZpaLegacyToken] got token prefix:', token.slice(0, 20) + '...');
-  return token;
+// OneAPI gateway. Every ZPA call made with a Zidentity (OneAPI) token goes through
+// this gateway — never the legacy config.<cloud> hosts, which only accept tokens
+// from legacy ZPA API keys. Source: zscaler-sdk-python RequestExecutor.
+const ONEAPI_GOV_GATEWAY = {
+  'zscalergov.net': 'https://api.zscalergov.net',
+  'zscalergov.us':  'https://api.zscalergov.us',
+};
+function oneApiGateway(cloudEnv) {
+  return ONEAPI_GOV_GATEWAY[cloudEnv] || 'https://api.zsapi.net';
+}
+
+// The ZPA customer ID is a long numeric ID (e.g. 216196257331281920) from the ZPA
+// console. It is NOT the Zidentity tenant ID (a UUID) — sending a UUID gets a 400.
+function checkZpaCustomerId(customerId) {
+  const id = String(customerId || '').trim();
+  if (!id) {
+    const e = new Error('ZPA Customer ID is required. Find it in the ZPA console under Configuration & Control > Public API > API Keys.');
+    e.code = 'CUSTOMER_ID_MISSING'; throw e;
+  }
+  if (!/^\d+$/.test(id)) {
+    const e = new Error(`"${id}" is not a ZPA Customer ID. It must be the numeric ZPA tenant ID (digits only), not the Zidentity tenant ID. Find it in the ZPA console under Configuration & Control > Public API > API Keys.`);
+    e.code = 'CUSTOMER_ID_INVALID'; throw e;
+  }
+  return id;
+}
+
+// One place to turn an axios/ZPA error into a message for the UI
+function zpaError(err) {
+  const d = err.response?.data;
+  return (d && (d.message || d.reason || d.exception)) || err.message;
 }
 
 /**
@@ -51,17 +68,6 @@ async function getZpaLegacyToken(clientId, clientSecret, zpaHost) {
  * authMode: 'apikey' | 'oauth' | 'oneapi'
  */
 async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId }) {
-  // OneAPI gateway host (confirmed from zscaler-sdk-python RequestExecutor.BASE_URL)
-  const ONEAPI_GATEWAY = {
-    'zscaler.com':    'https://api.zsapi.net',
-    'zscalertwo.net': 'https://api.zsapi.net',    // same gateway for commercial clouds
-    'zscalerthree.net':'https://api.zsapi.net',
-    'zscloud.net':    'https://api.zsapi.net',
-    'zscalerbeta.net':'https://api.zsapi.net',
-    'zscalerone.net': 'https://api.zsapi.net',
-    'zscalergov.net': 'https://api.zscalergov.net',
-    'zscalergov.us':  'https://api.zscalergov.us',
-  };
   switch (authMode) {
     case 'apikey': {
       return {
@@ -79,61 +85,14 @@ async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, 
       };
     }
     case 'oneapi': {
+      const id = checkZpaCustomerId(customerId);
       const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
       if (!token) throw new Error('OneAPI token was empty/undefined');
-
-      // Auto-detect ZPA host from token audience claims
-      // Token aud array contains entries like ZPA.zpatwo.net or ZPA.private.zscaler.com
-      // Map: ZPA.zpatwo.net -> config.zpatwo.net (legacy mgmtconfig host for that cloud)
-      let zpaHost = null;
-      try {
-        const parts = token.split('.');
-        const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString());
-        const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-        const zpaAud = audList.find(a => a && a.startsWith('ZPA.'));
-        if (zpaAud) {
-          zpaHost = 'https://' + zpaAud.replace('ZPA.', 'config.');
-          console.log('[getClient oneapi] detected ZPA host from token aud:', zpaHost);
-        }
-      } catch(e) { /* ignore decode errors */ }
-
-      // Fallback: use cloudEnv mapping
-      if (!zpaHost) {
-        const zpaHostMap = {
-          'zscaler.com':     'https://config.private.zscaler.com',
-          'zscalertwo.net':  'https://config.zpatwo.net',
-          'zscalerthree.net':'https://config.zpathree.net',
-          'zscloud.net':     'https://config.zscloud.net',
-          'zscalerbeta.net': 'https://config.zpabeta.net',
-          'zscalerone.net':  'https://config.zpaone.net',
-        };
-        zpaHost = zpaHostMap[cloudEnv] || 'https://config.private.zscaler.com';
-        console.log('[getClient oneapi] fallback ZPA host from cloudEnv:', zpaHost);
-      }
-
-      // Also compute OneAPI gateway for any non-ZPA-mgmtconfig calls
-      const gwHost = ONEAPI_GATEWAY[cloudEnv] || 'https://api.zsapi.net';
-      console.log('[getClient oneapi] zpaHost:', zpaHost, 'gwHost:', gwHost, 'customerId:', customerId, 'token:', token.slice(0, 20) + '...');
-
-      // config.zpatwo.net (and all ZPA config hosts) require a LEGACY ZPA token from /signin,
-      // not a OneAPI Bearer JWT. Get a legacy token using the same client credentials.
-      let mgmtHeaders;
-      try {
-        const legacyToken = await getZpaLegacyToken(clientId, clientSecret, zpaHost);
-        mgmtHeaders = { Authorization: `Bearer ${legacyToken}`, 'Content-Type': 'application/json' };
-        console.log('[getClient oneapi] using legacy ZPA token for mgmtBase calls');
-      } catch (legacyErr) {
-        console.warn('[getClient oneapi] legacy ZPA signin failed, falling back to OneAPI token:', legacyErr.message);
-        mgmtHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-      }
-
-      const mgmtBase = zpaHost + '/zpa/mgmtconfig/v1/admin/customers/' + (customerId || '');
+      const mgmtBase = `${oneApiGateway(cloudEnv)}/zpa/mgmtconfig/v1/admin/customers/${id}`;
       return {
-        headers: mgmtHeaders,        // legacy ZPA token for mgmtconfig calls
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         base: mgmtBase,
         mgmtBase,
-        zpaHost,
-        oneapiHeaders: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       };
     }
     default:
@@ -147,50 +106,19 @@ async function getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, 
 router.get('/validate', async (req, res) => {
   const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
   try {
-    let headers, base, mgmtBase;
-    // For OneAPI, we need to discover customerId first via /zpa/mgmtconfig/v1/admin/customers
+    let headers, base;
+    // OneAPI: getting a token proves the client ID / secret / vanity domain.
+    // ZPA data needs the numeric ZPA customer ID, which is entered on the setup step
+    // (OneAPI has no endpoint to look it up), so only load lists if we already have it.
     if (authMode === 'oneapi') {
-      const ZPA_HOST_MAP = {
-        'zscaler.com':     'https://config.private.zscaler.com',
-        'zscalertwo.net':  'https://config.zpatwo.net',
-        'zscalerthree.net':'https://config.zpathree.net',
-        'zscloud.net':     'https://config.zscloud.net',
-        'zscalerbeta.net': 'https://config.zpabeta.net',
-        'zscalerone.net':  'https://config.zpaone.net',
-      };
       const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
       if (!token) throw new Error('Failed to obtain OneAPI token');
-      // Auto-detect ZPA host from token audience
-      let zpaHost = ZPA_HOST_MAP[cloudEnv] || 'https://config.private.zscaler.com';
-      try {
-        const parts = token.split('.');
-        const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString());
-        const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-        const zpaAud = audList.find(a => a && a.startsWith('ZPA.'));
-        if (zpaAud) { zpaHost = 'https://' + zpaAud.replace('ZPA.', 'config.'); }
-      } catch(e) {}
-      console.log('[validate oneapi] zpaHost:', zpaHost);
-
-      // config.zpatwo.net requires legacy ZPA token, not OneAPI JWT
-      let legacyToken;
-      try { legacyToken = await getZpaLegacyToken(clientId, clientSecret, zpaHost); } catch(e) {}
-      headers = { Authorization: `Bearer ${legacyToken || token}`, 'Content-Type': 'application/json' };
-      if (legacyToken) console.log('[validate oneapi] using legacy ZPA token');
-
-      // Discover customer(s) for this token
-      const custRes = await axios.get(zpaHost + '/zpa/mgmtconfig/v1/admin/customers', { headers, timeout: 10000 })
-        .catch(() => null);
-      let customerId = null;
-      if (custRes?.data) {
-        const custList = custRes.data.list || custRes.data.customers || custRes.data || [];
-        const first = Array.isArray(custList) ? custList[0] : custList;
-        customerId = first?.id || first?.customerId || null;
-        console.log('[validate] discovered customerId:', customerId, 'from', zpaHost + '/zpa/mgmtconfig/v1/admin/customers');
+      const customerId = String(req.query.customerId || '').trim();
+      if (!/^\d+$/.test(customerId)) {
+        return res.json({ valid: true, authMode, customerId: null, connectorGroups: [], appSegments: [] });
       }
-      base = customerId
-        ? zpaHost + '/zpa/mgmtconfig/v1/admin/customers/' + customerId
-        : zpaHost + '/zpa/mgmtconfig/v1/admin/customers';
-      mgmtBase = base;
+      headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+      base = `${oneApiGateway(cloudEnv)}/zpa/mgmtconfig/v1/admin/customers/${customerId}`;
       const [cgRes, asRes] = await Promise.allSettled([
         axios.get(base + '/appConnectorGroup', { headers, timeout: 10000 }),
         axios.get(base + '/application', { headers, timeout: 10000 }),
@@ -217,7 +145,7 @@ router.get('/validate', async (req, res) => {
     res.json({ valid: true, authMode, base, connectorGroups: parseList(cgRes), appSegments: parseList(asRes) });
   } catch (err) {
     console.error('[validate error]', err.response?.status, err.response?.data, err.message);
-    res.status(401).json({ valid: false, error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message });
+    res.status(401).json({ valid: false, error: zpaError(err) });
   }
 });
 // POST /api/zpa/scan
@@ -246,7 +174,7 @@ router.post('/scan', async (req, res) => {
 
     res.json({ scanProfileId, scanId: scanRes.data.id });
   } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message });
+    res.status(400).json({ error: zpaError(err) });
   }
 });
 
@@ -268,7 +196,7 @@ router.post('/app-segments', async (req, res) => {
     }
     res.json({ created });
   } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message });
+    res.status(400).json({ error: zpaError(err) });
   }
 });
 
@@ -287,7 +215,7 @@ router.get('/connector-groups', async (req, res) => {
     res.json(list);
   } catch (err) {
     console.error('[connector-groups GET error]', err.response?.status, err.config?.url, JSON.stringify(err.response?.data));
-    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message, url: err.config?.url });
+    res.status(400).json({ error: zpaError(err), url: err.config?.url });
   }
 });
 
@@ -298,7 +226,7 @@ router.get('/server-groups', async (req, res) => {
     const r = await axios.get(mgmtBase + '/serverGroup', { headers, timeout: 10000 });
     const list = r.data.list || r.data.serverGroups || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
-  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message }); }
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
 });
 
 router.get('/enrollment-certs', async (req, res) => {
@@ -308,7 +236,7 @@ router.get('/enrollment-certs', async (req, res) => {
     const r = await axios.get(mgmtBase + '/enrollmentCert', { headers, timeout: 10000 });
     const list = r.data.list || r.data.enrollmentCerts || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
-  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message }); }
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
 });
 
 router.get('/provisioning-keys', async (req, res) => {
@@ -318,7 +246,7 @@ router.get('/provisioning-keys', async (req, res) => {
     const r = await axios.get(mgmtBase + '/associationType/CONNECTOR_GRP/provisioningKey', { headers, timeout: 10000 });
     const list = r.data.list || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
-  } catch (err) { res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message }); }
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
 });
 
 router.post('/provisioning-keys', async (req, res) => {
@@ -335,7 +263,7 @@ router.post('/provisioning-keys', async (req, res) => {
     }, { headers, timeout: 15000 });
     res.json(r.data);
   } catch (err) {
-    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message, url: err.config?.url, raw: err.response?.data });
+    res.status(400).json({ error: zpaError(err), url: err.config?.url, raw: err.response?.data });
   }
 });
 
@@ -357,7 +285,7 @@ router.post('/connector-groups', async (req, res) => {
     res.json(r.data);
   } catch (err) {
     console.error('[connector-groups POST error]', err.response?.status, err.config?.url, JSON.stringify(err.response?.data));
-    res.status(400).json({ error: err.response?.data?.message || err.response?.data?.reason || err.response?.data?.exception || err.message, url: err.config?.url, raw: err.response?.data });
+    res.status(400).json({ error: zpaError(err), url: err.config?.url, raw: err.response?.data });
   }
 });
 
@@ -365,24 +293,8 @@ router.get('/customer', async (req, res) => {
   const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain } = req.query;
   try {
     if (authMode === 'oneapi') {
-      const ZPA_HOST_MAP = { 'zscaler.com': 'https://config.private.zscaler.com', 'zscalertwo.net': 'https://config.zpatwo.net', 'zscalerthree.net': 'https://config.zpathree.net', 'zscloud.net': 'https://config.zscloud.net', 'zscalerbeta.net': 'https://config.zpabeta.net', 'zscalerone.net': 'https://config.zpaone.net' };
-      const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
-      const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-      // Auto-detect ZPA host from token audience
-      let zpaHost = ZPA_HOST_MAP[cloudEnv] || 'https://config.private.zscaler.com';
-      try {
-        const parts = token.split('.');
-        const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString());
-        const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-        const zpaAud = audList.find(a => a && a.startsWith('ZPA.'));
-        if (zpaAud) { zpaHost = 'https://' + zpaAud.replace('ZPA.', 'config.'); }
-      } catch(e) {}
-      let legacyTok; try { legacyTok = await getZpaLegacyToken(clientId, clientSecret, zpaHost); } catch(e) {}
-      const custHeaders = { Authorization: `Bearer ${legacyTok || token}`, 'Content-Type': 'application/json' };
-      const r = await axios.get(zpaHost + '/zpa/mgmtconfig/v1/admin/customers', { headers: custHeaders, timeout: 8000 });
-      const custList = r.data.list || r.data.customers || r.data || [];
-      const first = Array.isArray(custList) ? custList[0] : custList;
-      return res.json({ id: first?.id || first?.customerId, raw: r.data });
+      // OneAPI cannot look the ZPA customer ID up; the user has to enter it.
+      return res.status(404).json({ error: 'Enter your numeric ZPA Customer ID (ZPA console > Configuration & Control > Public API > API Keys).' });
     }
     const { headers, base } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain });
     const r = await axios.get(base + '/tenant', { headers, timeout: 8000 });

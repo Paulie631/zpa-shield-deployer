@@ -15,8 +15,8 @@ export default function ZPASetup({ data, update, next, back }) {
   const isAWS = data.target === 'aws'
 
   // Data from API
-  const [customerId, setCustomerId] = useState(data.customerId || 'aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d')
-  const [customerIdInput, setCustomerIdInput] = useState(data.customerId || 'aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d')
+  const [customerId, setCustomerId] = useState(data.customerId || '')
+  const [customerIdInput, setCustomerIdInput] = useState(data.customerId || '')
   const [connectorGroups, setConnectorGroups] = useState(data.connectorGroups || [])
   const [serverGroups, setServerGroups]       = useState([])
   const [enrollmentCerts, setEnrollmentCerts] = useState([])
@@ -64,6 +64,11 @@ export default function ZPASetup({ data, update, next, back }) {
         setCustomerId(cid)
       }
 
+      if (authParams.authMode === 'oneapi' && !/^\d+$/.test(cid || '')) {
+        if (cid) setLoadError('ZPA Customer ID must be the numeric ZPA tenant ID (digits only), not the Zidentity tenant ID.')
+        return
+      }
+
       const params = { ...authParams, customerId: cid }
 
       // Fetch connector groups, enrollment certs, provisioning keys in parallel
@@ -79,6 +84,9 @@ export default function ZPASetup({ data, update, next, back }) {
         setConnectorGroups(groups)
         // Auto-select if only one or if previously selected
         if (!connectorGroupId && groups.length === 1) setConnectorGroupId(groups[0].id)
+      } else {
+        const e = cgRes.reason
+        setLoadError(e?.response?.data?.error || e?.message || 'Could not load connector groups')
       }
       if (certRes.status === 'fulfilled') {
         const certs = certRes.value.data || []
@@ -202,20 +210,6 @@ export default function ZPASetup({ data, update, next, back }) {
               Then <button onClick={() => loadAll(customerId)} style={{ fontSize: '12px', padding: '2px 8px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: 'none' }}>Retry</button>
               &nbsp;or switch to <strong>API Key</strong> auth mode on step 1 to bypass this.
             </>
-          ) : (loadError.includes('bad.request') || (authParams.authMode === 'oneapi' && (loadError.includes('400') || loadError.includes('bad request')))) ? (
-            <>
-              <strong>🚫 OneAPI tokens not accepted by ZPA mgmtconfig</strong><br/>
-              The ZPA management API on <code>config.zpatwo.net</code> requires a <strong>ZPA API Key</strong>, not a OneAPI/Zidentity Bearer token.<br/>
-              This is a ZPA platform limitation — mgmtconfig predates OneAPI and uses its own auth system.<br/><br/>
-              <strong>Solution: Switch to API Key auth mode</strong>
-              <ol style={{ marginTop: '6px', marginBottom: '6px', paddingLeft: '18px' }}>
-                <li>Go back to <strong>Step 1 (ZPA Credentials)</strong></li>
-                <li>Select <strong>API Key</strong> auth mode</li>
-                <li>Tenant URL: <code>paulaiuto.zpatwo.net</code></li>
-                <li>Get your API Key: ZPA Admin Portal → <strong>Administration → API Key Management</strong></li>
-              </ol>
-              <em>Your OneAPI credentials still work for scan/shield operations on api.zscaler.com — only the setup step needs API Key.</em>
-            </>
           ) : (
             <>
               ⚠️ Couldn’t load ZPA data automatically: {loadError}
@@ -248,12 +242,15 @@ export default function ZPASetup({ data, update, next, back }) {
       <div className="form-group">
         <label>ZPA Customer ID</label>
         <input type="text"
-          placeholder="e.g. aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d"
+          placeholder="e.g. 216196257331281920"
           value={customerIdInput}
           onChange={e => setCustomerIdInput(e.target.value.trim())}
           onBlur={e => { const v = e.target.value.trim(); setCustomerIdInput(v); setCustomerId(v); if (v) loadAll(v); }}
         />
-        <div className="hint">Found in Zidentity: your Tenant ID is your Customer ID. For your account: <strong>aa920cc9-3bef-4dba-8fcd-ee7918c9cf2d</strong></div>
+        <div className="hint">The numeric ZPA tenant ID (digits only) — <strong>not</strong> the Zidentity tenant ID. Find it in the ZPA console under <strong>Configuration &amp; Control → Public API → API Keys</strong>.</div>
+        {customerIdInput && !/^\d+$/.test(customerIdInput) && (
+          <div className="hint" style={{ color: '#dc2626' }}>This doesn’t look like a ZPA Customer ID — it should be digits only.</div>
+        )}
       </div>
       {createMsg && (
         <div className={`alert ${createMsg.startsWith('✅') ? 'alert-info' : 'alert-error'}`} style={{ marginBottom: '12px' }}>
