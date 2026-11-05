@@ -89,7 +89,11 @@ export default function AddVmPanel({ apiId, apiKey, envId, regionId, existingVmI
               </option>
             ))}
           </select>
-          {chosen && chosen.rank > 0 && chosen.rank === best && <div className="hint" style={{ color: '#16a34a' }}>★ {recommendedText}</div>}
+          {chosen && chosen.rank > 0 && chosen.rank === best && (() => {
+            const text = typeof recommendedText === 'function' ? recommendedText(chosen) : recommendedText
+            const caution = /^Best available/.test(text)
+            return <div className="hint" style={{ color: caution ? '#b45309' : '#16a34a' }}>★ {text}</div>
+          })()}
           {chosen && chosen.rank < 0 && <div className="hint" style={{ color: '#dc2626' }}>This template isn’t recommended for this VM — pick a ★ one if you can.</div>}
           {templates.length > 0 && best <= 0 && <div className="hint" style={{ color: '#d97706' }}>{noneText}</div>}
           <div className="hint">After it starts, the wizard checks the VM can reach the internet.{resize ? ` It is then resized to ${resize.numCpus} vCPU / ${resize.memorySizeMBs / 1024} GB RAM / ${resize.diskSizeGBs} GB disk.` : ''}</div>

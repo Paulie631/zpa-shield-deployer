@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import NetworkCheck from '../components/NetworkCheck'
 import AddVmPanel from '../components/AddVmPanel'
-import { rankTemplate, rankScannerTemplate, SCANNER_SPEC } from '../lib/templates'
+import { rankTemplate, rankScannerTemplate, describeScannerTemplate, SCANNER_SPEC } from '../lib/templates'
 
 const CS_STORAGE_KEY = 'zpa-cs-creds'
 const PROJECT_ID     = 'PRotcbPOeZ9_Dd4lJww1o-6A2'
@@ -117,7 +117,8 @@ export default function CloudShareConfig({ data, update, next, back }) {
         policyId:  POLICY_ID,
         blueprintId: BP_APP_SCANNER,
         regionId: createRegion,
-        envName: 'ZPA App Scanner',
+        // CloudShare needs unique environment names
+        envName: `ZPA App Scanner ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
         description: 'RHEL 9 App Scanner — created by ZPA Shield Deployer',
       })
 
@@ -398,7 +399,7 @@ export default function CloudShareConfig({ data, update, next, back }) {
                       existingVmIds={(envDetail.vms || []).map(v => v.id)}
                       rank={rankScannerTemplate} preferredName={PREFERRED_SCANNER_TEMPLATE}
                       title="Add a plain RHEL 9 VM for the App Scanner" vmName="App Scanner RHEL9"
-                      recommendedText="Recommended — plain RHEL 9, as Zscaler requires for the App Scanner."
+                      recommendedText={describeScannerTemplate}
                       noneText="No RHEL 9 templates found. Type in the filter box to search all templates, or ask your CloudShare admin for a RHEL 9 template."
                       resize={SCANNER_SPEC}
                       onAdded={(detail, newId, note) => { setEnvDetail(detail); if (newId) setSelectedVm(newId); setAddNote(note); setShowAddScanner(false) }}

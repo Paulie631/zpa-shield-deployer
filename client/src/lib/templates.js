@@ -21,7 +21,7 @@ export function rankTemplate(name = '') {
   const rhel = n.match(/(rocky|alma|rhel|red ?hat|centos stream|centos)[^0-9]*(\d+)/)
   if (rhel) {
     const v = parseInt(rhel[2], 10)
-    if (v >= 9) return 520
+    if (v >= 9) return 520 - (/desktop|workstation|gui/.test(n) ? 5 : 0)
     if (v === 8) return 480
     return -10                                          // CentOS 7 and older
   }
@@ -39,11 +39,18 @@ export function rankTemplate(name = '') {
 export function rankScannerTemplate(name = '') {
   const n = name.toLowerCase()
   if (/connector|app ?scanner|zscaler|zpa/.test(n)) return -20   // prebuilt Zscaler images are not supported
+  const desktop = /desktop|workstation|gui/.test(n) ? -5 : 0      // prefer server editions
   const m = n.match(/(rhel|red ?hat[a-z ]*?)[^0-9]*(\d+)/)
-  if (m) return parseInt(m[2], 10) === 9 ? 600 : -10
+  if (m) return parseInt(m[2], 10) === 9 ? 600 + desktop : -10
   const clone = n.match(/(rocky|alma)[^0-9]*(\d+)/)
-  if (clone) return parseInt(clone[2], 10) === 9 ? 300 : -10     // RHEL-compatible, but not RHEL
+  if (clone) return parseInt(clone[2], 10) === 9 ? 300 + desktop : -10   // RHEL-compatible, but not RHEL
   return -50
+}
+
+// What to say about the recommended scanner template
+export function describeScannerTemplate(t) {
+  if (t.rank >= 590) return 'Recommended — plain RHEL 9, as Zscaler requires for the App Scanner.'
+  return `Best available — your account has no RHEL 9 template. ${t.name} is RHEL 9-compatible, but Zscaler only lists RHEL 9 for the App Scanner, so the install may refuse it. If it does, ask your CloudShare admin for a RHEL 9 template.`
 }
 
 export const SCANNER_SPEC = { numCpus: 16, memorySizeMBs: 16384, diskSizeGBs: 200 }
