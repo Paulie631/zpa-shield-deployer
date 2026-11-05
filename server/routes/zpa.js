@@ -57,6 +57,9 @@ function checkZpaCustomerId(customerId) {
   return id;
 }
 
+// Enrollment certs live under mgmtconfig v2 (everything else used here is v1)
+const ENROLLMENT_CERT_URL = (mgmtBase) => mgmtBase.replace('/mgmtconfig/v1/', '/mgmtconfig/v2/') + '/enrollmentCert';
+
 // One place to turn an axios/ZPA error into a message for the UI
 function zpaError(err) {
   const d = err.response?.data;
@@ -233,7 +236,7 @@ router.get('/enrollment-certs', async (req, res) => {
   const { authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId } = req.query;
   try {
     const { headers, mgmtBase } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId });
-    const r = await axios.get(mgmtBase + '/enrollmentCert', { headers, timeout: 10000 });
+    const r = await axios.get(ENROLLMENT_CERT_URL(mgmtBase), { headers, timeout: 10000 });
     const list = r.data.list || r.data.enrollmentCerts || (Array.isArray(r.data) ? r.data : []);
     res.json(list);
   } catch (err) { res.status(400).json({ error: zpaError(err) }); }
@@ -274,8 +277,21 @@ router.post('/connector-groups', async (req, res) => {
     const { headers, mgmtBase } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId });
     const url = mgmtBase + '/appConnectorGroup';
     console.log('[connector-groups POST]', url, 'name:', name);
+
+    // ZPA requires the "Connector" enrollment (signing) cert on the group.
+    // Use the one the UI sent, otherwise look it up (same as zscaler-sdk-python).
+    let enrollmentCertId = req.body.enrollmentCertId;
+    if (!enrollmentCertId) {
+      const cr = await axios.get(ENROLLMENT_CERT_URL(mgmtBase), { headers, params: { search: 'Connector' }, timeout: 10000 });
+      const certs = cr.data.list || cr.data.enrollmentCerts || (Array.isArray(cr.data) ? cr.data : []);
+      const cert = certs.find(c => (c.name || '').toLowerCase() === 'connector') || certs.find(c => /connector/i.test(c.name || ''));
+      if (!cert) throw new Error('No "Connector" enrollment certificate found in this ZPA tenant — cannot create a connector group.');
+      enrollmentCertId = cert.id;
+    }
+
     const r = await axios.post(url, {
       name,
+      enrollmentCertId,
       description: description || 'App Scanner connector group - created by ZPA Shield Deployer',
       latitude: latitude || '37.3382', longitude: longitude || '-121.8863',
       location: location || 'San Jose, CA',
