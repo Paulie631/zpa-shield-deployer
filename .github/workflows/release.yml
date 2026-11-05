@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history + tags, for the release notes
 
       - name: Read version
         id: v
@@ -39,16 +41,26 @@ jobs:
       - name: Build zip
         run: git archive --format=zip --prefix=zpa-shield-deployer/ -o "zpa-shield-deployer-v${{ steps.v.outputs.version }}.zip" HEAD
 
+      - name: Write release notes
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: |
+          # Notes typed into "Run workflow" win; otherwise list the commits since the last release
+          if [ -n "$NOTES" ]; then
+            printf '%s\n' "$NOTES" > notes.md
+          else
+            PREV=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
+            RANGE=${PREV:+$PREV..}HEAD
+            git log "$RANGE" --no-merges --format='- %s' \
+              | grep -viE '^- (chore: bump version|Update release\.yml)' > notes.md || true
+            [ -s notes.md ] || echo "- Maintenance release" > notes.md
+          fi
+          cat notes.md
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          NOTES: ${{ inputs.notes }}
         run: |
           TAG="v${{ steps.v.outputs.version }}"
-          if [ -n "$NOTES" ]; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES" \
-              "zpa-shield-deployer-$TAG.zip" install.sh install.bat
-          else
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes \
-              "zpa-shield-deployer-$TAG.zip" install.sh install.bat
-          fi
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md \
+            "zpa-shield-deployer-$TAG.zip" install.sh install.bat
