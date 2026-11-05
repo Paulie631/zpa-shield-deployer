@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const crypto = require('crypto');
+const { generateSetupScript } = require('../templates/setupScript');
 
 const CS_BASE = 'https://use.cloudshare.com';
 
@@ -186,6 +187,109 @@ router.get('/vms/:vmId/execute/:execId', async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// ─── Setup script ─────────────────────────────────────────────────────────────
+
+// POST /api/cloudshare/script — generate the pre-filled setup script
+router.post('/script', (req, res) => {
+  try {
+    res.json({ script: generateSetupScript(req.body) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ─── Run the setup script on the VM ───────────────────────────────────────────
+// CloudShare has no file-upload API, only "run a command" (executePath). So the
+// script is sent to the VM in base64 chunks, decoded there, then started in the
+// background (it takes several minutes and reboots the VM at the end, which is
+// longer than one command call can wait). Progress is read back from its log.
+
+const VM_B64  = '/tmp/zpa-setup.b64';
+const VM_SH   = '/tmp/zpa-setup.sh';
+const VM_LOG  = '/tmp/zpa-setup.log';
+const CHUNK   = 1500;
+const DONE_MARKER = 'Setup complete!';
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Run one command on the VM and wait for it to finish. Returns its stdout.
+async function runOnVm(apiId, apiKey, vmId, command, timeoutMs = 45000) {
+  const started = await csPost(apiId, apiKey, '/api/v3/vms/actions/executepath', { vmId, path: command });
+  const executionId = started && started.executionId;
+  if (!executionId) throw new Error('CloudShare did not return an executionId: ' + JSON.stringify(started));
+  const q = `/api/v3/vms/actions/checkexecutionstatus?vmId=${encodeURIComponent(vmId)}&executionId=${encodeURIComponent(executionId)}`;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep(2000);
+    const st = await csGet(apiId, apiKey, q);
+    if (st && st.success) {
+      return { stdout: st.standardOutput || '', stderr: st.standardError || '', raw: st };
+    }
+  }
+  throw new Error(`Timed out waiting for the VM to run: ${command.slice(0, 60)}...`);
+}
+
+const csError = (err) => err.response?.data?.message || err.response?.data?.Message || err.message;
+
+// POST /api/cloudshare/vms/:vmId/run-setup — upload the setup script and start it
+router.post('/vms/:vmId/run-setup', async (req, res) => {
+  const { apiId, apiKey, provisioningKey, ssmParamName, region } = req.body;
+  const { vmId } = req.params;
+  let stage = 'checking the VM';
+  try {
+    if (!provisioningKey) throw new Error('No provisioning key — complete the ZPA Setup step first.');
+    const script = generateSetupScript({ provisioningKey, ssmParamName, region });
+    const b64 = Buffer.from(script, 'utf8').toString('base64');
+
+    // 1. Can we run commands, and as root?
+    const who = await runOnVm(apiId, apiKey, vmId, 'bash -c "id -u; sudo -n true 2>/dev/null && echo SUDO_OK"');
+    const isRoot = /^0\s*$/m.test(who.stdout);
+    const hasSudo = /SUDO_OK/.test(who.stdout);
+    if (!isRoot && !hasSudo) {
+      throw new Error('Commands on this VM do not run as root and passwordless sudo is not available. Run the script manually with: sudo bash setup.sh (VM said: ' + (who.stdout.trim() || who.stderr.trim() || 'nothing') + ')');
+    }
+    const sudo = isRoot ? '' : 'sudo -n ';
+
+    // 2. Upload in chunks (base64 only contains characters that are safe inside double quotes)
+    stage = 'uploading the script';
+    await runOnVm(apiId, apiKey, vmId, `bash -c "rm -f ${VM_B64} ${VM_SH}; : > ${VM_B64}"`);
+    for (let i = 0; i < b64.length; i += CHUNK) {
+      await runOnVm(apiId, apiKey, vmId, `bash -c "printf %s ${b64.slice(i, i + CHUNK)} >> ${VM_B64}"`);
+    }
+
+    // 3. Decode and verify the size matches what we sent
+    stage = 'verifying the upload';
+    const check = await runOnVm(apiId, apiKey, vmId, `bash -c "base64 -d ${VM_B64} > ${VM_SH} && wc -c < ${VM_SH}"`);
+    const gotBytes = parseInt(check.stdout.trim(), 10);
+    const wantBytes = Buffer.byteLength(script, 'utf8');
+    if (gotBytes !== wantBytes) {
+      throw new Error(`Script upload was corrupted (sent ${wantBytes} bytes, VM has ${isNaN(gotBytes) ? check.stdout.trim() || 'nothing' : gotBytes}).`);
+    }
+
+    // 4. Start it detached so it survives this command returning
+    stage = 'starting the script';
+    await runOnVm(apiId, apiKey, vmId,
+      `bash -c "rm -f ${VM_B64}; ${sudo}setsid nohup bash ${VM_SH} > ${VM_LOG} 2>&1 < /dev/null & echo STARTED"`);
+
+    res.json({ started: true, runsAs: isRoot ? 'root' : 'sudo', logPath: VM_LOG });
+  } catch (err) {
+    console.error('[run-setup error]', stage, err.response?.status, csError(err));
+    res.status(400).json({ error: `Failed while ${stage}: ${csError(err)}`, stage });
+  }
+});
+
+// GET /api/cloudshare/vms/:vmId/setup-log — tail the setup log on the VM
+router.get('/vms/:vmId/setup-log', async (req, res) => {
+  const { apiId, apiKey } = req.query;
+  const { vmId } = req.params;
+  try {
+    const out = await runOnVm(apiId, apiKey, vmId, `bash -c "tail -n 60 ${VM_LOG} 2>&1"`, 30000);
+    res.json({ log: out.stdout, done: out.stdout.includes(DONE_MARKER) });
+  } catch (err) {
+    // Expected once the script reboots the VM at the end
+    res.status(400).json({ error: csError(err) });
   }
 });
 
