@@ -23,6 +23,16 @@ export default function PublishApps({ data, update, next, back }) {
   const [conn, setConn] = useState(data.publishConn || { state: 'idle', lines: [] })
   const [segs, setSegs] = useState(data.publishSegs || { state: 'idle', lines: [] })
   const [rule, setRule] = useState(data.publishRule || { state: 'idle', lines: [] })
+
+  // Who the access rule applies to: everyone, or one SCIM group from the IdP
+  const [scim, setScim] = useState(null)          // { groups, idps } or null while loading
+  const [scimGroupId, setScimGroupId] = useState(data.accessScimGroupId || '')
+  useEffect(() => {
+    if (needsCid) return
+    axios.get('/api/zpa/scim-groups', { params: zpaAuth({ ...data, customerId: cid }) })
+      .then(r => setScim(r.data)).catch(() => setScim({ groups: [], idps: [] }))
+  }, [needsCid])
+  const scimGroup = (scim?.groups || []).find(g => g.id === scimGroupId)
   const [stack, setStack] = useState({ status: '', ip: '', failures: [] })
   const [csLog, setCsLog] = useState('')            // CloudShare: traffic connector install log
   const csLogRef = useRef(null)
@@ -105,7 +115,10 @@ export default function PublishApps({ data, update, next, back }) {
   const doRule = async () => {
     setRule({ state: 'running', lines: [] })
     try {
-      const r = await axios.post('/api/zpa/test-apps-access-rule', zpaAuth(data))
+      const r = await axios.post('/api/zpa/test-apps-access-rule', {
+        ...zpaAuth(data), scimGroup: scimGroup ? { idpId: scimGroup.idpId, groupId: scimGroup.id, name: scimGroup.name } : null,
+      })
+      update({ accessScimGroupId: scimGroupId, accessScimGroupName: scimGroup?.name || '' })
       setRule({ state: 'done', lines: r.data.steps || [] })
     } catch (e) { setRule({ state: 'error', lines: [], error: errOf(e) }); throw e }
   }
@@ -179,7 +192,19 @@ export default function PublishApps({ data, update, next, back }) {
       <Part n={2} title="App segments" part={segs} onRetry={() => doSegments().catch(() => {})}
         desc={<>“ZPA Shield - DVWA” ({ip || '?'}:80) and “ZPA Shield - Juice Shop” ({ip || '?'}:3000), in segment group “ZPA Shield Test Apps”.</>} />
       <Part n={3} title="Access policy rule" part={rule} onRetry={() => doRule().catch(() => {})}
-        desc={<>“ZPA Shield - allow test apps” — lets users reach the ZPA Shield Test Apps segment group. It applies to all users; narrow it to a group in the <a href={zpaPortalBase(data)} target="_blank" rel="noreferrer">ZPA Admin Portal</a> if you like.</>} />
+        desc={<>“ZPA Shield - allow test apps” — lets users reach the ZPA Shield Test Apps segment group.</>}
+        extra={(
+          <div style={{ margin: '8px 0 0 24px' }}>
+            <label style={{ fontSize: 13 }}>Who can access the test apps</label>
+            <select value={scimGroupId} onChange={e => setScimGroupId(e.target.value)} disabled={running || rule.state === 'running'}>
+              <option value="">All users</option>
+              {(scim?.groups || []).map(g => <option key={g.id} value={g.id}>{g.name}{scim.idps.length > 1 ? ` (${g.idpName})` : ''}</option>)}
+            </select>
+            <div className="hint">
+              {scim === null ? 'Loading groups from your identity provider...' : scim.groups.length === 0 ? 'No SCIM groups found — the rule will apply to all users. Groups appear here once SCIM provisioning is set up for your IdP in ZPA.' : 'Pick a group (e.g. a demo or SE group) to keep the vulnerable apps away from everyone else. Changing it and clicking Retry updates the rule.'}
+            </div>
+          </div>
+        )} />
 
       {allDone && (
         <div className="alert alert-success">

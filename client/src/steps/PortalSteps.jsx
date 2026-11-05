@@ -1,11 +1,13 @@
 import React, { useState } from 'react'
 import { zpaPortalBase } from '../lib/zpa'
 
-const STEPS = (base) => [
+const STEPS = (base, data) => [
   {
     id: 'version-profile',
-    title: 'Assign AppShield 1.0 Scanner Version Profile',
-    desc: 'In the ZPA Admin Portal, edit your App Connector Group → Version Profile Configuration → set to Custom → select "AppShield 1.0 scanner profile". Ensure it is provisioned via a SET-OPS ticket.',
+    title: data.scannerVersionProfileName ? `Version profile: done — "${data.scannerVersionProfileName}" is pinned to the scanner group` : 'Assign AppShield 1.0 Scanner Version Profile',
+    desc: data.scannerVersionProfileName
+      ? 'The wizard set this through the ZPA API on the Scanner Key step. Just confirm it shows in the portal.'
+      : 'In the ZPA Admin Portal, edit your App Connector Group → Version Profile Configuration → set to Custom → select "AppShield 1.0 scanner profile". (The Scanner Key step can do this for you if the profile is visible to your tenant.)',
     link: `${base}/app#appConnectorGroups`,
     linkLabel: '→ Open App Connector Groups'
   },
@@ -32,7 +34,7 @@ const STEPS = (base) => [
 ]
 
 export default function PortalSteps({ data, update, next, back }) {
-  const steps = STEPS(zpaPortalBase(data))
+  const steps = STEPS(zpaPortalBase(data), data)
   const [checked, setChecked] = useState(data.portalStepsChecked || {})
 
   const toggle = (id) => {

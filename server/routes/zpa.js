@@ -269,11 +269,47 @@ router.post('/traffic-connector', async (req, res) => {
   }
 });
 
+// GET /api/zpa/scim-groups — SCIM groups from each user IdP, for scoping the access rule
+router.get('/scim-groups', async (req, res) => {
+  try {
+    const { headers, mgmtBase: base } = await getClient(req.query);
+    const idps = (await axios.get(`${base}/idp`, { headers, params: { pagesize: 100 }, timeout: 15000 })).data.list || [];
+    const groups = [];
+    for (const idp of idps.filter(i => (i.ssoType || []).includes('USER') || !i.ssoType)) {
+      for (let page = 1; page <= 10; page++) {
+        const r = await axios.get(`${base.replace('/mgmtconfig/v1/', '/userconfig/v1/')}/scimgroup/idpId/${idp.id}`, { headers, params: { page, pagesize: 500 }, timeout: 15000 }).catch(() => ({ data: {} }));
+        const list = r.data.list || [];
+        groups.push(...list.map(g => ({ id: String(g.id), name: g.name, idpId: String(idp.id), idpName: idp.name })));
+        if (page >= (parseInt(r.data.totalPages, 10) || 1)) break;
+      }
+    }
+    groups.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ groups, idps: idps.map(i => ({ id: String(i.id), name: i.name })) });
+  } catch (err) {
+    res.status(400).json({ error: zpaError(err) });
+  }
+});
+
 const ACCESS_RULE = 'ZPA Shield - allow test apps';
+
+// v2 rule body: allow the test apps segment group, optionally only for one SCIM group
+function accessRuleBody(segmentGroupId, scimGroup) {
+  const conditions = [{ operands: [{ objectType: 'APP_GROUP', values: [segmentGroupId] }] }];
+  if (scimGroup && scimGroup.idpId && scimGroup.groupId) {
+    conditions.push({ operands: [{ objectType: 'SCIM_GROUP', entryValues: [{ lhs: String(scimGroup.idpId), rhs: String(scimGroup.groupId) }] }] });
+  }
+  return {
+    name: ACCESS_RULE,
+    description: (scimGroup?.name ? `Lets members of "${scimGroup.name}"` : 'Lets users') + ' reach DVWA and Juice Shop through ZPA - created by ZPA Shield Deployer',
+    action: 'ALLOW',
+    conditions,
+  };
+}
 
 // POST /api/zpa/test-apps-access-rule — access policy rule allowing the test apps' segment group
 // (v2 rule format, as in zscaler-sdk-python add_access_rule_v2). Re-running reuses the rule.
 router.post('/test-apps-access-rule', async (req, res) => {
+  const { scimGroup } = req.body;   // optional { idpId, groupId, name }
   let stage = 'connecting to ZPA';
   try {
     const { headers, mgmtBase: base } = await getClient(req.body);
@@ -285,17 +321,18 @@ router.post('/test-apps-access-rule', async (req, res) => {
     stage = 'reading the access policy';
     const policySet = (await axios.get(`${base}/policySet/policyType/ACCESS_POLICY`, { headers, timeout: 15000 })).data;
     const existing = await findByName(base, headers, 'policySet/rules/policyType/ACCESS_POLICY', ACCESS_RULE);
-    if (existing) return res.json({ ruleId: existing.id, steps: [`Access rule "${ACCESS_RULE}" already exists`] });
+    const v2 = base.replace('/mgmtconfig/v1/', '/mgmtconfig/v2/');
+    const scope = scimGroup?.name ? `members of "${scimGroup.name}"` : 'all users';
+    if (existing) {
+      // Re-apply so a changed scope (all users <-> a group) takes effect
+      stage = 'updating the access rule';
+      await axios.put(`${v2}/policySet/${policySet.id}/rule/${existing.id}`, accessRuleBody(sg.id, scimGroup), { headers, timeout: 15000 });
+      return res.json({ ruleId: existing.id, steps: [`Access rule "${ACCESS_RULE}" updated — allows ${scope}`] });
+    }
 
     stage = 'creating the access rule';
-    const v2 = base.replace('/mgmtconfig/v1/', '/mgmtconfig/v2/');
-    const rule = (await axios.post(`${v2}/policySet/${policySet.id}/rule`, {
-      name: ACCESS_RULE,
-      description: 'Lets users reach DVWA and Juice Shop through ZPA - created by ZPA Shield Deployer',
-      action: 'ALLOW',
-      conditions: [{ operands: [{ objectType: 'APP_GROUP', values: [sg.id] }] }],
-    }, { headers, timeout: 15000 })).data;
-    res.json({ ruleId: rule.id, steps: [`Created access rule "${ACCESS_RULE}" for segment group "${TEST_SEGMENT_GROUP}"`] });
+    const rule = (await axios.post(`${v2}/policySet/${policySet.id}/rule`, accessRuleBody(sg.id, scimGroup), { headers, timeout: 15000 })).data;
+    res.json({ ruleId: rule.id, steps: [`Created access rule "${ACCESS_RULE}" for segment group "${TEST_SEGMENT_GROUP}" — allows ${scope}`] });
   } catch (err) {
     console.error('[access-rule error]', stage, err.response?.status, JSON.stringify(err.response?.data));
     res.status(400).json({ error: `Failed while ${stage}: ${zpaError(err)}` });
@@ -495,6 +532,31 @@ router.get('/app-segments', async (req, res) => {
     const { headers, mgmtBase } = await getClient({ authMode, tenantUrl, apiKey, clientId, clientSecret, cloudEnv, vanityDomain, customerId });
     const r = await axios.get(mgmtBase + '/application', { headers, params: { pagesize: 500 }, timeout: 15000 });
     res.json(r.data.list || r.data.applications || (Array.isArray(r.data) ? r.data : []));
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
+});
+
+// GET /api/zpa/version-profiles — connector version profiles visible to the tenant
+router.get('/version-profiles', async (req, res) => {
+  try {
+    const { headers, mgmtBase: base } = await getClient(req.query);
+    const r = await axios.get(`${base}/visible/versionProfiles`, { headers, params: { pagesize: 500 }, timeout: 15000 });
+    const list = r.data.list || (Array.isArray(r.data) ? r.data : []);
+    res.json(list.map(p => ({ id: String(p.id), name: p.name, description: p.description || '' })));
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
+});
+
+// PUT /api/zpa/connector-groups/:id/version-profile — pin the group to a version profile
+// (the App Shield scanner needs the AppShield profile, which Portal Steps used to ask for by hand)
+router.put('/connector-groups/:id/version-profile', async (req, res) => {
+  const { versionProfileId } = req.body;
+  try {
+    if (!versionProfileId) throw new Error('versionProfileId is required');
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    const group = (await axios.get(`${base}/appConnectorGroup/${req.params.id}`, { headers, timeout: 15000 })).data;
+    const body = { ...group, overrideVersionProfile: true, versionProfileId: String(versionProfileId) };
+    delete body.connectors; delete body.serverGroups;   // read-only sub-objects on PUT
+    await axios.put(`${base}/appConnectorGroup/${req.params.id}`, body, { headers, timeout: 15000 });
+    res.json({ ok: true, groupId: req.params.id, versionProfileId: String(versionProfileId) });
   } catch (err) { res.status(400).json({ error: zpaError(err) }); }
 });
 

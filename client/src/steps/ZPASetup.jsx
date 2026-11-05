@@ -57,6 +57,31 @@ export default function ZPASetup({ data, update, next, back }) {
   const [creating, setCreating]                   = useState(false)
   const [createMsg, setCreateMsg]                 = useState('')
 
+  // App Shield scanner needs the AppShield connector version profile on its group
+  const [profiles, setProfiles] = useState(null)
+  const [profileId, setProfileId] = useState(data.scannerVersionProfileId || '')
+  const [profileMsg, setProfileMsg] = useState('')
+  const loadProfiles = async () => {
+    try {
+      const r = await axios.get('/api/zpa/version-profiles', { params: { ...authParams, customerId: customerId || customerIdInput } })
+      const list = r.data || []
+      setProfiles(list)
+      const best = list.find(p => /app ?shield/i.test(p.name)) || list.find(p => /shield|scanner/i.test(p.name))
+      if (!profileId && best) setProfileId(best.id)
+      return list
+    } catch (e) { setProfiles([]); return [] }
+  }
+  const applyProfile = async (groupId, pid) => {
+    if (!groupId || !pid) return
+    setProfileMsg('Assigning version profile...')
+    try {
+      await axios.put(`/api/zpa/connector-groups/${groupId}/version-profile`, { ...authParams, customerId: customerId || customerIdInput, versionProfileId: pid })
+      const name = (profiles || []).find(p => p.id === pid)?.name || pid
+      setProfileMsg(`✅ Connector group pinned to version profile "${name}"`)
+      update({ scannerVersionProfileId: pid, scannerVersionProfileName: name })
+    } catch (e) { setProfileMsg(`⚠️ Couldn't assign the version profile: ${e.response?.data?.error || e.message}. Set it in the ZPA portal (App Connector Groups → edit → Version Profile).`) }
+  }
+
   // Load all data on mount
   useEffect(() => {
     loadAll()
@@ -85,6 +110,7 @@ export default function ZPASetup({ data, update, next, back }) {
       }
 
       const params = { ...authParams, customerId: cid }
+      loadProfiles()
       if (/^\d+$/.test(cid || '')) saveCid(tenantKey, cid)
 
       // Fetch connector groups, enrollment certs, provisioning keys in parallel
@@ -155,6 +181,10 @@ export default function ZPASetup({ data, update, next, back }) {
       setShowNewGroup(false)
       setCreateMsg(`✅ Created connector group: ${newGroup.name}`)
       setTimeout(() => setCreateMsg(''), 4000)
+      // Pin the new group to the AppShield profile straight away
+      const list = profiles || await loadProfiles()
+      const pid = profileId || (list.find(p => /app ?shield/i.test(p.name)) || list.find(p => /shield|scanner/i.test(p.name)))?.id
+      if (pid) { setProfileId(pid); await applyProfile(newGroup.id, pid) }
     } catch (err) {
       setCreateMsg(`❌ ${err.response?.data?.error || err.message} ${err.response?.data?.url ? '[' + err.response.data.url + ']' : ''}`)
     } finally { setCreating(false) }
@@ -318,6 +348,24 @@ export default function ZPASetup({ data, update, next, back }) {
       </div>
 
       {/* ── Provisioning Key ── */}
+      <div className="form-group">
+        <label>Scanner version profile</label>
+        <div className="hint" style={{ marginBottom: 6 }}>The App Scanner runs a dedicated connector build. Its connector group must use the <strong>AppShield</strong> version profile — this used to be a manual portal step.</div>
+        {profiles === null ? <div className="hint">Loading version profiles...</div> : (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <select value={profileId} onChange={e => setProfileId(e.target.value)} style={{ flex: 1 }}>
+              <option value="">— Select a version profile —</option>
+              {profiles.map(p => <option key={p.id} value={p.id}>{/app ?shield/i.test(p.name) ? '★ ' : ''}{p.name}</option>)}
+            </select>
+            <button className="btn btn-secondary" onClick={() => applyProfile(connectorGroupId, profileId)} disabled={!connectorGroupId || !profileId} style={{ whiteSpace: 'nowrap' }}>Apply to group</button>
+          </div>
+        )}
+        {profiles && profiles.length > 0 && !profiles.some(p => /app ?shield|shield|scanner/i.test(p.name)) && (
+          <div className="hint" style={{ color: '#b45309' }}>No profile named AppShield is visible to this tenant. Ask Zscaler to enable Autonomous Application Shield for your tenant, or pick the profile they told you to use.</div>
+        )}
+        {profileMsg && <div className="hint" style={{ marginTop: 6 }}>{profileMsg}</div>}
+      </div>
+
       <div className="form-group">
         <label>ZPA Provisioning Key <span className="label-required">*</span></label>
 
