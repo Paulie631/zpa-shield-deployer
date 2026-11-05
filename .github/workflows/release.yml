@@ -10,6 +10,9 @@ on:
         description: "Release notes (leave blank to auto-generate from commits)"
         required: false
         default: ""
+  push:
+    branches: [main]
+    paths: [package.json]
 
 permissions:
   contents: write
