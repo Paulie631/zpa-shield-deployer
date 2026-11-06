@@ -425,6 +425,34 @@ router.post('/verify-publish', async (req, res) => {
       scope: rule ? scope : null,
     });
 
+    // IdP: Client Connector can only enrol a user for ZPA if an enabled IdP with user SSO
+    // covers the user's email domain — otherwise ZCC shows "Unable to verify the IdP
+    // configuration for this domain". IdPs live under mgmtconfig v2.
+    stage = 'checking the identity provider';
+    try {
+      const idps = [];
+      for (let page = 1; page <= 5; page++) {
+        const r = await axios.get(`${base.replace('/mgmtconfig/v1/', '/mgmtconfig/v2/')}/idp`, { headers, params: { page, pagesize: 100 }, timeout: 15000 });
+        idps.push(...(r.data.list || []));
+        if (page >= (parseInt(r.data.totalPages, 10) || 1)) break;
+      }
+      const userSso = (i) => (i.ssoType || []).some(t => /USER/i.test(t)) || /USER/i.test(i.ssoType || '');
+      const usable = idps.filter(i => i.enabled !== false && userSso(i));
+      const domain = String(req.body.login || '').split('@')[1]?.toLowerCase();
+      const covering = domain ? usable.filter(i => (i.domainList || []).map(d => String(d).toLowerCase()).includes(domain)) : usable;
+      const describe = (i) => `${i.name} (${(i.domainList || []).join(', ') || 'no domains'})`;
+      checks.push({
+        id: 'idp', ok: covering.length > 0,
+        label: domain ? `IdP with Client Connector SSO for @${domain}` : 'IdP with Client Connector SSO for users',
+        detail: idps.length === 0 ? 'No IdP configured in ZPA. Add one (Zidentity) under Administration → Private Access Authentication / IdP Configuration, with Single Sign-On: User and the users\' email domain.'
+          : usable.length === 0 ? `IdPs exist (${idps.map(describe).join('; ')}) but none is enabled with Single Sign-On for Users.`
+          : covering.length === 0 ? `Enabled user IdPs: ${usable.map(describe).join('; ')} — none lists @${domain}. Add the domain to the IdP (for Zidentity: Zidentity → Organization → Domains), or ZCC will say "Unable to verify the IdP configuration for this domain".`
+          : covering.map(describe).join('; '),
+      });
+    } catch (e) {
+      checks.push({ id: 'idp', ok: true, label: 'IdP configuration', detail: `Couldn't read IdPs (${zpaError(e)}) — check Administration → Private Access Authentication by hand.` });
+    }
+
     res.json({ checks, allOk: checks.every(c => c.ok) });
   } catch (err) {
     res.status(400).json({ error: `Failed while ${stage}: ${zpaError(err)}` });

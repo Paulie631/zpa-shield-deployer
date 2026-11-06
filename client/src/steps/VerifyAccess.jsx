@@ -15,14 +15,14 @@ export default function VerifyAccess({ data, update, next, back }) {
 
   // ── A. ZPA checks
   const [zpa, setZpa] = useState({ state: 'idle', checks: [] })
-  const runZpaChecks = async () => {
+  const runZpaChecks = async (loginForIdp) => {
     setZpa({ state: 'running', checks: [] })
     try {
-      const r = await axios.post('/api/zpa/verify-publish', { ...zpaAuth(data), ip })
+      const r = await axios.post('/api/zpa/verify-publish', { ...zpaAuth(data), ip, login: loginForIdp ?? data.zccLogin ?? '' })
       setZpa({ state: 'done', checks: r.data.checks || [], allOk: r.data.allOk })
     } catch (e) { setZpa({ state: 'error', checks: [], error: e.response?.data?.error || e.message }) }
   }
-  useEffect(() => { runZpaChecks() }, [])
+  useEffect(() => { runZpaChecks(data.zccLogin || '') }, [])
 
   // ── A2. The user who will sign in to Client Connector: does Zidentity entitle them to ZPA?
   const [login, setLogin] = useState(data.zccLogin || '')
@@ -35,6 +35,7 @@ export default function VerifyAccess({ data, update, next, back }) {
       const r = await axios.post('/api/zpa/zid/check-user', { ...zpaAuth(data), login })
       const c = { state: 'done', ...r.data }
       setUserCheck(c); update({ zccUserCheck: c })
+      runZpaChecks(login)   // the IdP check depends on the user's email domain
     } catch (e) { setUserCheck({ state: 'error', error: e.response?.data?.error || e.message }) }
   }
   const entitleUser = async () => {
@@ -164,7 +165,7 @@ export default function VerifyAccess({ data, update, next, back }) {
       <div style={box}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <strong>1. ZPA configuration</strong>
-          <button onClick={runZpaChecks} disabled={zpa.state === 'running'} style={{ fontSize: 12 }}>↻ Check again</button>
+          <button onClick={() => runZpaChecks(login)} disabled={zpa.state === 'running'} style={{ fontSize: 12 }}>↻ Check again</button>
         </div>
         {zpa.state === 'running' && <div className="hint"><span className="spinner spinner-blue" /> Checking ZPA...</div>}
         {zpa.state === 'error' && <div className="alert alert-error" style={{ marginTop: 8 }}><span>⚠️ {zpa.error}</span></div>}

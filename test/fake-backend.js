@@ -32,6 +32,7 @@ axios.get=async(u,c)=>{ if(u.includes('/ziam/')){ if(/\/users$/.test(u)) return 
   if(u.includes('getextended')) return ok({id:'E1',name:'ZPA App Scanner',statusText:'Ready',projectName:'SE Labs',regionId:'R1',vms});
   if(u.includes('/api/v3/templates')) return ok([{id:'T0',name:'Ubuntu 16.04 Server',regionId:'R1',resources:{cpuCount:2,memorySizeMB:4096}},{id:'T1',name:'Ubuntu 22.04 Server',regionId:'R1',resources:{cpuCount:2,memorySizeMB:4096}},{id:'T4',name:'Red Hat Enterprise Linux 9.4',regionId:'R1',resources:{cpuCount:2,memorySizeMB:4096}},{id:'T2',name:'Windows Server 2022',regionId:'R1',resources:{cpuCount:4,memorySizeMB:8192}},{id:'T3',name:'CentOS 9 Stream',regionId:'R1',resources:{cpuCount:2,memorySizeMB:4096}}]);
   if(u.includes('/api/v3/envs')) return ok([{id:'E1',name:'ZPA App Scanner'}]);
+  if(/\/v2\/.*\/idp$/.test(u)) return ok({list:[{id:'I1',name:'Zidentity',enabled:true,ssoType:['USER','ADMIN'],domainList:['example.com']}],totalPages:'1'});
   if(u.includes('enrollmentCert')) return ok({list:[{id:'42',name:'Connector'}]});
   if(u.endsWith('policySet/policyType/ACCESS_POLICY')) return ok({id:'PS1'});
   if(u.endsWith('/appConnectorGroup')) return ok({list:[{id:'new1',name:'ZPA-AppScanner-Group'},{id:'CG2',name:'Traffic Connectors'}]});
