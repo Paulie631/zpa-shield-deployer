@@ -812,7 +812,7 @@ router.post('/zid/check-user', async (req, res) => {
   try {
     const c = await zidClient(req.body);
     const user = await zidFindUser(c, req.body.login);
-    if (!user) return res.json({ found: false, login: req.body.login, hint: `No Zidentity user matches "${req.body.login}". Check the spelling, or create the user (Administration → Users) and try again.` });
+    if (!user) return res.json({ found: false, login: req.body.login, hint: `No Zidentity user matches "${req.body.login}". If ZPA signs users in through an external IdP (Okta, Entra…), that's expected — the user lives in that IdP, so this check doesn't apply; the IdP check above is what matters. Otherwise check the spelling or create the user (Administration → Authentication → Users).` });
     const [ent, groups] = await Promise.all([zidServiceEntitlements(c, user.id), zidUserGroups(c, user.id)]);
     res.json({
       found: true,

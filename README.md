@@ -174,3 +174,13 @@ MIT — see [LICENSE](LICENSE)
 - [ZPA Documentation](https://help.zscaler.com/zpa)
 - [aiguard-se-kit](https://github.com/Paulie631/aiguard-se-kit)
 - [zscaler-pov-kit](https://github.com/Paulie631/zscaler-pov-kit)
+
+## ZPA user sign-in (IdP) for the Verify step
+
+Client Connector can only bring up Private Access if ZPA has an enabled IdP with **Single Sign-On: User** covering the user's email domain; otherwise ZCC shows *"Unable to verify the IdP configuration for this domain"*. The Verify step checks this. If the tenant has no user IdP (Zidentity end-user auth not enabled), a free Okta Integrator org works:
+
+1. ZPA → Private Access Authentication → IdP Configuration → Add (name, your user domain) → Next → note the SP Entity ID and SP URL.
+2. Okta (developer.okta.com/signup, Integrator Free Plan) → Directory → People → add the user (password set by admin) → Applications → Applications → Create App Integration → SAML 2.0: Single sign-on URL = SP URL, Audience URI = SP Entity ID, Name ID = EmailAddress, username = Okta username → assign the user → Sign On tab → save the Metadata URL page as XML.
+3. Back in ZPA, upload that XML as the IdP metadata, Single Sign-On: User, Enabled. Edit the same IdP rather than recreating it — the SP URLs are tied to the IdP entry.
+4. In ZCC, Log Out and sign in again; Okta will ask the user to enroll Okta Verify on first sign-in.
+
