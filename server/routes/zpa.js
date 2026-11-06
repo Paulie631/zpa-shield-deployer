@@ -418,10 +418,12 @@ router.post('/verify-publish', async (req, res) => {
       }
       scope = `members of ${names.map(n => `"${n}"`).join(', ')} only`;
     }
+    // ZPA sends disabled as "0"/"1" (string) on some tenants, boolean on others
+    const ruleDisabled = !!rule && [true, 1, '1', 'true'].includes(rule.disabled);
     checks.push({
-      id: 'rule', ok: !!rule && rule.action !== 'DENY' && rule.disabled !== true,
+      id: 'rule', ok: !!rule && rule.action !== 'DENY' && !ruleDisabled,
       label: `Access rule "${ACCESS_RULE}"`,
-      detail: !rule ? 'Not found — run Publish Apps' : rule.disabled ? 'Present but disabled' : `Allows ${scope}`,
+      detail: !rule ? 'Not found — run Publish Apps' : ruleDisabled ? 'Present but disabled' : `Allows ${scope}`,
       scope: rule ? scope : null,
     });
 

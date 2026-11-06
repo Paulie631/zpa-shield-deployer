@@ -15,7 +15,7 @@ axios.post=async(u,b)=>{ if(u.includes('/ziam/')){ if(/\/groups$/.test(u)){const
     out[id]=o;return ok({executionId:id});}
   if(u.includes('/appProtection/')){const e=new Error('Request failed with status code 404');e.response={status:404,data:{id:'resource.not.found',reason:'No handler found'}};throw e;}
   if(u.includes('/provisioningKey')) return ok({id:'pk1',name:b.name,provisioningKey:'3|api.private.zscaler.com|FAKEKEY=='});
-  const k=zkey(u);const o={id:'z'+(++n),...b};if(k){(zdb[k]=zdb[k]||[]).push(o);if(/policySet\/[^/]+\/rule$/.test(k))(zdb['policySet/rules/policyType/ACCESS_POLICY']=zdb['policySet/rules/policyType/ACCESS_POLICY']||[]).push(o);}
+  const k=zkey(u);const o={id:'z'+(++n),disabled:'0',...b};if(k){(zdb[k]=zdb[k]||[]).push(o);if(/policySet\/[^/]+\/rule$/.test(k))(zdb['policySet/rules/policyType/ACCESS_POLICY']=zdb['policySet/rules/policyType/ACCESS_POLICY']||[]).push(o);}
   return ok(o);};
 axios.put=async(u,b)=>{ if(u.endsWith('/api/v3/envs')){const nm=b.itemsCart[0].name;vms.push({id: b.itemsCart[0].type===4?'V4':(nm.includes('Scanner')?'V3':'V2'),name:nm,os:'Linux',cpuCount:2,memorySizeMb:4096,diskSizeGb:40,statusText:'Running',internalAddresses:[nm.includes('Scanner')?'10.0.0.7':'10.0.0.9']});return ok({environmentId:b.envId});}
   if(u.includes('editvmhardware')){const v=vms.find(x=>x.id===b.vmId);v.cpuCount=b.numCpus;v.memorySizeMb=b.memorySizeMBs;v.diskSizeGb=b.diskSizeGBs;return ok({conflictsFound:false});} return ok({});};
