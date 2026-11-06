@@ -24,6 +24,32 @@ export default function VerifyAccess({ data, update, next, back }) {
   }
   useEffect(() => { runZpaChecks() }, [])
 
+  // ── A2. The user who will sign in to Client Connector: does Zidentity entitle them to ZPA?
+  const [login, setLogin] = useState(data.zccLogin || '')
+  const [userCheck, setUserCheck] = useState(data.zccUserCheck || null)   // { state, ...response }
+  const [entitling, setEntitling] = useState(null)                        // { state, ...response }
+  const checkUser = async () => {
+    setUserCheck({ state: 'running' }); setEntitling(null)
+    update({ zccLogin: login })
+    try {
+      const r = await axios.post('/api/zpa/zid/check-user', { ...zpaAuth(data), login })
+      const c = { state: 'done', ...r.data }
+      setUserCheck(c); update({ zccUserCheck: c })
+    } catch (e) { setUserCheck({ state: 'error', error: e.response?.data?.error || e.message }) }
+  }
+  const entitleUser = async () => {
+    setEntitling({ state: 'running' })
+    try {
+      const r = await axios.post('/api/zpa/zid/entitle-user', { ...zpaAuth(data), login })
+      setEntitling({ state: 'done', ...r.data })
+      await checkUser()
+      setEntitling({ state: 'done', ...r.data })
+    } catch (e) { setEntitling({ state: 'error', error: e.response?.data?.error || e.message }) }
+  }
+  const ruleScope = zpa.checks.find(c => c.id === 'rule')?.scope || ''
+  const ruleGroup = (ruleScope.match(/members of "([^"]+)"/) || [])[1]
+  const userInRuleGroup = !ruleGroup || (userCheck?.groups || []).includes(ruleGroup)
+
   // ── B. Test client on CloudShare
   const saved = loadCSCreds()
   const [apiId, setApiId] = useState(data.csApiId || saved.apiId || '')
@@ -145,12 +171,34 @@ export default function VerifyAccess({ data, update, next, back }) {
         {zpa.checks.map(c => row(c.ok, c.label, c.detail, c.id))}
         {zpa.state === 'done' && zpa.checks.find(c => c.id === 'rule')?.ok && (
           <div style={{ marginTop: 10, padding: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13 }}>
-            <strong>Will the user you sign in with get access?</strong> Three things have to be true:
-            <ol style={{ margin: '6px 0 0 18px', padding: 0 }}>
-              <li>The user is in <strong>this tenant</strong> ({data.vanityDomain ? `${data.vanityDomain}.zslogin.net` : 'your Zidentity tenant'}) and signs in to Client Connector with it. A Zidentity hosted-DB user is fine.</li>
-              <li>The user is covered by the rule — it currently allows <strong>{zpa.checks.find(c => c.id === 'rule').scope}</strong>.{/members of/.test(zpa.checks.find(c => c.id === 'rule').scope || '') ? ' Check the user is in that group in Zidentity (Administration → Groups), or go back to Publish and choose All users.' : ''}</li>
-              <li>In Zidentity, the user has the <strong>Private Access</strong> service entitlement (Administration → Users → the user → Services). Without it, ZCC signs in but ZPA stays off for that user.</li>
-            </ol>
+            <strong>Will the user you sign in with get access?</strong> Three things have to be true: the user is in <strong>this tenant</strong> ({data.vanityDomain ? `${data.vanityDomain}.zslogin.net` : 'your Zidentity tenant'}), the rule covers them (it allows <strong>{ruleScope}</strong>), and Zidentity gives them the <strong>Private Access</strong> service. Enter the login you sign in to Client Connector with and the wizard checks all three in Zidentity:
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <input value={login} onChange={e => setLogin(e.target.value)} placeholder="user@example.com" style={{ flex: 1, padding: '6px 8px' }} onKeyDown={e => e.key === 'Enter' && login && checkUser()} />
+              <button className="btn btn-secondary" onClick={checkUser} disabled={!login || userCheck?.state === 'running'}>{userCheck?.state === 'running' ? <span className="spinner spinner-blue" /> : 'Check user'}</button>
+            </div>
+            {userCheck?.state === 'error' && <div className="alert alert-error" style={{ marginTop: 8 }}><span>⚠️ {userCheck.error}</span></div>}
+            {userCheck?.state === 'done' && !userCheck.found && <div className="alert alert-warning" style={{ marginTop: 8 }}><span>❌ {userCheck.hint}</span></div>}
+            {userCheck?.state === 'done' && userCheck.found && (
+              <div style={{ marginTop: 8 }}>
+                {row(true, `${userCheck.user.loginName} exists in this tenant`, `${userCheck.user.displayName || ''}${userCheck.user.idp ? ` · ${userCheck.user.idp}` : ''}${userCheck.user.status ? ` · ${userCheck.user.status}` : ''}`, 'u1')}
+                {row(userInRuleGroup, ruleGroup ? `Covered by the access rule (member of "${ruleGroup}")` : 'Covered by the access rule (all users)', !userInRuleGroup ? `Not in "${ruleGroup}" — add them in Zidentity (Administration → Groups) or go back to Publish and choose All users. Groups: ${(userCheck.groups || []).join(', ') || 'none'}` : null, 'u2')}
+                {row(userCheck.hasZpa, 'Private Access service entitlement', userCheck.services?.length ? `Services: ${userCheck.services.map(s => s.name).join(', ')}` : (userCheck.raw ? `Zidentity returned an unexpected shape: ${JSON.stringify(userCheck.raw).slice(0, 160)}` : 'No services entitled'), 'u3')}
+                {!userCheck.hasZpa && (
+                  <div style={{ marginTop: 6 }}>
+                    <button className="btn btn-primary" onClick={entitleUser} disabled={entitling?.state === 'running'}>{entitling?.state === 'running' ? <span className="spinner" /> : `Enable Private Access via API`}</button>
+                    <div className="hint" style={{ marginTop: 4 }}>Adds the user to the Zidentity group “{userCheck.groupName}”. Zidentity has no API to put an entitlement straight on a user, so that group is linked to Private Access once in the portal; after that every user the wizard adds is entitled automatically.</div>
+                  </div>
+                )}
+                {entitling?.state === 'error' && <div className="alert alert-error" style={{ marginTop: 8 }}><span>⚠️ {entitling.error}</span></div>}
+                {entitling?.state === 'done' && (
+                  <div className={`alert ${entitling.hasZpa ? 'alert-success' : 'alert-warning'}`} style={{ marginTop: 8 }}>
+                    <span>{entitling.createdGroup ? `Created group "${entitling.group.name}". ` : ''}{entitling.addedToGroup ? `Added ${entitling.user.loginName} to "${entitling.group.name}". ` : `${entitling.user.loginName} was already in "${entitling.group.name}". `}
+                    {entitling.hasZpa ? '✅ Private Access is now on for this user — have them Log Out and sign in again in Client Connector.' : entitling.portalStep}</span>
+                  </div>
+                )}
+                {userCheck.hasZpa && userInRuleGroup && <div className="hint" style={{ marginTop: 6 }}>✅ This user should get access. If Client Connector shows no Private Access tab, Log Out and sign in again (entitlement changes apply at sign-in), then open <code>http://{ip}</code> and click “Both apps load” below.</div>}
+              </div>
+            )}
             <div className="hint" style={{ marginTop: 6 }}>Quickest proof: sign in to Client Connector on any Mac or PC outside the VPC (your personal laptop works) with that user and open <code>http://{ip}</code> — then click “Both apps load” below.</div>
           </div>
         )}

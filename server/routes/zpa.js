@@ -722,4 +722,116 @@ router.get('/debug-token', async (req, res) => {
   }
 });
 
+// ─── Zidentity (user entitlements) ──────────────────────────────────────────
+// Zidentity's admin API rides the same OneAPI token: {gateway}/ziam/admin/api/v1.
+// It can read a user's service entitlements and manage group membership, but has no
+// call that writes an entitlement straight onto a user. Entitlements are granted to
+// groups in the portal (Administration → Entitlements → Private Access), so the wizard
+// puts the user in a group and the admin links that group once.
+const ZID_GROUP = 'ZPA Shield Test Users';
+
+async function zidClient(body) {
+  const { authMode, clientId, clientSecret, cloudEnv, vanityDomain } = body;
+  if (authMode !== 'oneapi') throw new Error('User entitlement checks need OneAPI (Zidentity) mode — legacy ZPA API keys cannot read Zidentity.');
+  const token = await getOneApiToken(clientId, clientSecret, vanityDomain);
+  return { base: `${oneApiGateway(cloudEnv)}/ziam/admin/api/v1`, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' } };
+}
+
+function zidError(err) {
+  const st = err.response?.status;
+  if (st === 401 || st === 403) {
+    return `Zidentity refused the request (HTTP ${st}). The API client needs the Zidentity resource with user/group read-write scopes: Zidentity console → Integration → API Clients → your client → Resources → add "Zidentity" (users, groups). Then try again.`;
+  }
+  return zpaError(err);
+}
+
+const records = (d) => Array.isArray(d) ? d : (d?.records || d?.list || d?.results || []);
+
+async function zidFindUser(c, login) {
+  const want = String(login || '').trim().toLowerCase();
+  if (!want) throw new Error('Enter the login the user signs in to Client Connector with (e.g. user@example.com)');
+  const match = (u) => [u.loginName, u.primaryEmail].filter(Boolean).some(v => String(v).toLowerCase() === want);
+  for (const p of [{ loginName: want }, { 'loginName[like]': want }, { 'primaryEmail[like]': want }]) {
+    const r = await axios.get(`${c.base}/users`, { headers: c.headers, params: { ...p, limit: 100 }, timeout: 20000 });
+    const hit = records(r.data).find(match);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// What services is this user entitled to? Normalise whatever shape Zidentity returns.
+async function zidServiceEntitlements(c, userId) {
+  const r = await axios.get(`${c.base}/users/${encodeURIComponent(userId)}/service-entitlements`, { headers: c.headers, timeout: 20000 });
+  const d = r.data;
+  const items = Array.isArray(d) ? d : (d?.records || d?.services || d?.entitlements || (d?.service ? [d] : (d && typeof d === 'object' ? [d] : [])));
+  const services = items.map(it => {
+    const s = it.service || it;
+    return { name: s.serviceName || s.name || s.displayName || '', cloud: s.cloudName || '', org: s.orgName || '' };
+  }).filter(s => s.name);
+  const hasZpa = services.some(s => /zpa|private.?access/i.test(s.name));
+  return { services, hasZpa, raw: services.length ? undefined : d };
+}
+
+async function zidUserGroups(c, userId) {
+  try {
+    const r = await axios.get(`${c.base}/users/${encodeURIComponent(userId)}/groups`, { headers: c.headers, params: { limit: 500 }, timeout: 20000 });
+    return records(r.data).map(g => g.name || g.displayName).filter(Boolean);
+  } catch { return []; }
+}
+
+// POST /api/zpa/zid/check-user { ...auth, login } → user, entitlements, groups
+router.post('/zid/check-user', async (req, res) => {
+  try {
+    const c = await zidClient(req.body);
+    const user = await zidFindUser(c, req.body.login);
+    if (!user) return res.json({ found: false, login: req.body.login, hint: `No Zidentity user matches "${req.body.login}". Check the spelling, or create the user (Administration → Users) and try again.` });
+    const [ent, groups] = await Promise.all([zidServiceEntitlements(c, user.id), zidUserGroups(c, user.id)]);
+    res.json({
+      found: true,
+      user: { id: user.id, loginName: user.loginName, displayName: user.displayName, status: user.status, idp: user.idp?.name || user.idp?.displayName || (user.source === 'HOSTED' ? 'Zidentity (hosted DB)' : user.source) },
+      services: ent.services, hasZpa: ent.hasZpa, raw: ent.raw, groups,
+      inGroup: groups.some(g => g === ZID_GROUP), groupName: ZID_GROUP,
+    });
+  } catch (err) { res.status(400).json({ error: zidError(err) }); }
+});
+
+// POST /api/zpa/zid/entitle-user { ...auth, login } → put the user in ZID_GROUP (create it if
+// needed) and re-read entitlements. If Private Access still isn't on, the group hasn't been
+// linked to the entitlement yet — that's the one portal step.
+router.post('/zid/entitle-user', async (req, res) => {
+  try {
+    const c = await zidClient(req.body);
+    const user = await zidFindUser(c, req.body.login);
+    if (!user) return res.status(404).json({ error: `No Zidentity user matches "${req.body.login}"` });
+
+    let group = null, createdGroup = false;
+    const g = await axios.get(`${c.base}/groups`, { headers: c.headers, params: { 'name[like]': ZID_GROUP, limit: 100 }, timeout: 20000 });
+    group = records(g.data).find(x => x.name === ZID_GROUP) || null;
+    if (!group) {
+      const made = await axios.post(`${c.base}/groups`, {
+        name: ZID_GROUP, description: 'Users allowed to reach the ZPA Shield test apps — created by ZPA Shield Deployer',
+        source: 'MANUAL', isDynamicGroup: false, serviceEntitlementEnabled: true, adminEntitlementEnabled: false,
+      }, { headers: c.headers, timeout: 20000 });
+      group = made.data; createdGroup = true;
+    }
+
+    const before = await zidServiceEntitlements(c, user.id);
+    const groups = await zidUserGroups(c, user.id);
+    let addedToGroup = false;
+    if (!groups.includes(ZID_GROUP)) {
+      await axios.post(`${c.base}/groups/${encodeURIComponent(group.id)}/users/${encodeURIComponent(user.id)}`, {}, { headers: c.headers, timeout: 20000 });
+      addedToGroup = true;
+    }
+    // Entitlement propagation can lag a moment
+    let after = await zidServiceEntitlements(c, user.id);
+    if (!after.hasZpa && addedToGroup) { await new Promise(r => setTimeout(r, 2500)); after = await zidServiceEntitlements(c, user.id); }
+
+    res.json({
+      user: { id: user.id, loginName: user.loginName }, group: { id: group.id, name: group.name }, createdGroup, addedToGroup,
+      hadZpa: before.hasZpa, hasZpa: after.hasZpa, services: after.services,
+      portalStep: after.hasZpa ? null : `"${ZID_GROUP}" is not linked to the Private Access entitlement yet. One-time portal step: Experience Center → Administration → Entitlements → Private Access → add the group "${ZID_GROUP}" (Zidentity console: Administration → Entitlements → Service Entitlements → Private Access). Then click "Check again".`,
+    });
+  } catch (err) { res.status(400).json({ error: zidError(err) }); }
+});
+
 module.exports = router;

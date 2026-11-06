@@ -4,7 +4,8 @@
 const path=require('path');const root=path.resolve(__dirname,'..');const axios=require(root+'/node_modules/axios');const {execSync}=require('child_process');const fs=require('fs');
 const out={};let n=0;const zdb={};const zkey=u=>{const x=u.match(/customers\/\d+\/(.+)$/);return x?x[1]:null};let vms=[{id:'V1',name:'zpa-connector-el9-2026.05',os:'Linux',cpuCount:4,memorySizeMb:4096,diskSizeGb:64,statusText:'Running',internalAddresses:['10.0.0.5'],username:'admin',password:'x'}];
 const ok=d=>({data:d});
-axios.post=async(u,b)=>{ if(u.endsWith('/api/v3/envs')) return ok({environmentId:'E2'});
+axios.post=async(u,b)=>{ if(u.includes('/ziam/')){ if(/\/groups$/.test(u)){const g={id:'G'+(zid.groups.length+1),name:b.name};zid.groups.push(g);return ok(g);} const m=u.match(/\/groups\/(\w+)\/users\/(\w+)$/); if(m){const g=zid.groups.find(x=>x.id===m[1]);(zid.members[m[2]]=zid.members[m[2]]||[]).push(g.name);return ok({});} return ok({}); }
+  if(u.endsWith('/api/v3/envs')) return ok({environmentId:'E2'});
   if(u.includes('zslogin')) return ok({access_token:'a.b.c'});
   if(u.includes('executepath')){const id='e'+(++n);let o='';
     if(b.path.startsWith('powershell')){ out[id]= b.vmId==='W1' ? ['ZCC: Zscaler Service=Running','URL http://172.31.5.5/ -> 302','URL http://172.31.5.5:3000/ -> 200','URL http://10.0.0.5/ -> 302','URL http://10.0.0.5:3000/ -> 200'].join(String.fromCharCode(10)) : ''; return ok({executionId:id}); }
@@ -18,7 +19,13 @@ axios.post=async(u,b)=>{ if(u.endsWith('/api/v3/envs')) return ok({environmentId
   return ok(o);};
 axios.put=async(u,b)=>{ if(u.endsWith('/api/v3/envs')){const nm=b.itemsCart[0].name;vms.push({id: b.itemsCart[0].type===4?'V4':(nm.includes('Scanner')?'V3':'V2'),name:nm,os:'Linux',cpuCount:2,memorySizeMb:4096,diskSizeGb:40,statusText:'Running',internalAddresses:[nm.includes('Scanner')?'10.0.0.7':'10.0.0.9']});return ok({environmentId:b.envId});}
   if(u.includes('editvmhardware')){const v=vms.find(x=>x.id===b.vmId);v.cpuCount=b.numCpus;v.memorySizeMb=b.memorySizeMBs;v.diskSizeGb=b.diskSizeGBs;return ok({conflictsFound:false});} return ok({});};
-axios.get=async(u,c)=>{ if(/\/projects\/[^/]+\/blueprints$/.test(u)) return ok([{id:'BP1',name:'App Connector Base'},{id:'BPZ',name:'Windows 11 - ZCC'}]);
+// Zidentity: one hosted user, no groups, ZIA only until added to the entitlement group (then ZPA appears)
+const zid={groups:[],members:{}};
+axios.get=async(u,c)=>{ if(u.includes('/ziam/')){ if(/\/users$/.test(u)) return ok({records:(c.params.loginName||c.params['loginName[like]']||'').startsWith('ztest')?[{id:'U1',loginName:'ztest@example.com',displayName:'Z Test',status:'ACTIVE',source:'HOSTED'}]:[]});
+    if(u.endsWith('/service-entitlements')) return ok({records:[{service:{serviceName:'ZIA',cloudName:'zscalerthree.net'}}].concat((zid.members.U1||[]).includes('ZPA Shield Test Users')?[{service:{serviceName:'ZPA',cloudName:'private.zscaler.com'}}]:[])});
+    if(/\/users\/U1\/groups$/.test(u)) return ok({records:(zid.members.U1||[]).map(n=>({name:n}))});
+    if(/\/groups$/.test(u)) return ok({records:zid.groups}); return ok({records:[]}); }
+  if(/\/projects\/[^/]+\/blueprints$/.test(u)) return ok([{id:'BP1',name:'App Connector Base'},{id:'BPZ',name:'Windows 11 - ZCC'}]);
   if(u.includes('getextended')&&u.includes('E2')) return ok({id:'E2',name:'ZPA Test Client',statusText:'Ready',regionId:'R1',vms:[{id:'W1',name:'win11-zcc',os:'Windows 11',statusText:'Running',webAccessUrl:'https://use.cloudshare.com/x'}]});
   if(u.includes('/blueprints/')) return ok({createFromVersions:[{id:'SS1',name:'v2026.05',isDefault:true,machines:[{id:'MC1',name:'zpa-connector-el9-2026.05',osTypeName:'Linux',resources:{cpuCount:4,memorySizeMB:4096}}]}]});
   if(u.includes('checkexecutionstatus')) return ok({success:true,standardOutput:out[new URL(u).searchParams.get('executionId')]});
