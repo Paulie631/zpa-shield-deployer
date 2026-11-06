@@ -143,6 +143,17 @@ export default function VerifyAccess({ data, update, next, back }) {
         {zpa.state === 'running' && <div className="hint"><span className="spinner spinner-blue" /> Checking ZPA...</div>}
         {zpa.state === 'error' && <div className="alert alert-error" style={{ marginTop: 8 }}><span>⚠️ {zpa.error}</span></div>}
         {zpa.checks.map(c => row(c.ok, c.label, c.detail, c.id))}
+        {zpa.state === 'done' && zpa.checks.find(c => c.id === 'rule')?.ok && (
+          <div style={{ marginTop: 10, padding: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13 }}>
+            <strong>Will the user you sign in with get access?</strong> Three things have to be true:
+            <ol style={{ margin: '6px 0 0 18px', padding: 0 }}>
+              <li>The user is in <strong>this tenant</strong> ({data.vanityDomain ? `${data.vanityDomain}.zslogin.net` : 'your Zidentity tenant'}) and signs in to Client Connector with it. A Zidentity hosted-DB user is fine.</li>
+              <li>The user is covered by the rule — it currently allows <strong>{zpa.checks.find(c => c.id === 'rule').scope}</strong>.{/members of/.test(zpa.checks.find(c => c.id === 'rule').scope || '') ? ' Check the user is in that group in Zidentity (Administration → Groups), or go back to Publish and choose All users.' : ''}</li>
+              <li>In Zidentity, the user has the <strong>Private Access</strong> service entitlement (Administration → Users → the user → Services). Without it, ZCC signs in but ZPA stays off for that user.</li>
+            </ol>
+            <div className="hint" style={{ marginTop: 6 }}>Quickest proof: sign in to Client Connector on any Mac or PC outside the VPC (your personal laptop works) with that user and open <code>http://{ip}</code> — then click “Both apps load” below.</div>
+          </div>
+        )}
       </div>
 
       {/* B */}
@@ -208,7 +219,7 @@ export default function VerifyAccess({ data, update, next, back }) {
       {/* C */}
       <div style={box}>
         <strong>3. Check it yourself</strong>
-        <div className="hint">In the test client VM’s browser (with Client Connector on), open <code>http://{ip || '…'}</code> (DVWA login page) and <code>http://{ip || '…'}:3000</code> (Juice Shop).</div>
+        <div className="hint">On any device with Client Connector signed in to this tenant — the test VM above, or your own laptop — open <code>http://{ip || '…'}</code> (DVWA login page) and <code>http://{ip || '…'}:3000</code> (Juice Shop).</div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <button className={`btn ${manual === 'works' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setManualResult('works')}>✅ Both apps load</button>
           <button className={`btn ${manual === 'fails' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setManualResult('fails')}>❌ They don’t load</button>

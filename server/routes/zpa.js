@@ -402,7 +402,28 @@ router.post('/verify-publish', async (req, res) => {
 
     stage = 'checking the access rule';
     const rule = await findByName(base, headers, 'policySet/rules/policyType/ACCESS_POLICY', ACCESS_RULE);
-    checks.push({ id: 'rule', ok: !!rule, label: `Access rule "${ACCESS_RULE}"`, detail: rule ? 'Present' : 'Not found — run Publish Apps' });
+    // Who the rule applies to: no SCIM_GROUP operand = everyone in the tenant
+    let scope = 'all users in the tenant';
+    const scimOperands = [];
+    for (const c of (rule?.conditions || [])) for (const o of (c.operands || [])) {
+      if (o.objectType === 'SCIM_GROUP') scimOperands.push(...((o.entryValues || []).map(v => ({ idpId: String(v.lhs), groupId: String(v.rhs) })).concat(o.lhs && o.rhs ? [{ idpId: String(o.lhs), groupId: String(o.rhs) }] : [])));
+    }
+    if (scimOperands.length) {
+      const names = [];
+      for (const { idpId, groupId } of scimOperands) {
+        try {
+          const r = await axios.get(`${base.replace('/mgmtconfig/v1/', '/userconfig/v1/')}/scimgroup/idpId/${idpId}`, { headers, params: { pagesize: 500 }, timeout: 15000 });
+          names.push((r.data.list || []).find(g => String(g.id) === groupId)?.name || `group ${groupId}`);
+        } catch (e) { names.push(`group ${groupId}`); }
+      }
+      scope = `members of ${names.map(n => `"${n}"`).join(', ')} only`;
+    }
+    checks.push({
+      id: 'rule', ok: !!rule && rule.action !== 'DENY' && rule.disabled !== true,
+      label: `Access rule "${ACCESS_RULE}"`,
+      detail: !rule ? 'Not found — run Publish Apps' : rule.disabled ? 'Present but disabled' : `Allows ${scope}`,
+      scope: rule ? scope : null,
+    });
 
     res.json({ checks, allOk: checks.every(c => c.ok) });
   } catch (err) {
