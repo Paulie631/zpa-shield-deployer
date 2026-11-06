@@ -66,7 +66,8 @@ export default function ZPASetup({ data, update, next, back }) {
       const r = await axios.get('/api/zpa/version-profiles', { params: { ...authParams, customerId: customerId || customerIdInput } })
       const list = r.data || []
       setProfiles(list)
-      const best = list.find(p => /app ?shield/i.test(p.name)) || list.find(p => /shield|scanner/i.test(p.name))
+      // AppShield-named profile if the tenant has one; otherwise New Release (a current build, proven to scan)
+      const best = list.find(p => /app ?shield/i.test(p.name)) || list.find(p => /shield|scanner/i.test(p.name)) || list.find(p => /new release/i.test(p.name))
       if (!profileId && best) setProfileId(best.id)
       return list
     } catch (e) { setProfiles([]); return [] }
@@ -350,7 +351,7 @@ export default function ZPASetup({ data, update, next, back }) {
       {/* ── Provisioning Key ── */}
       <div className="form-group">
         <label>Scanner version profile</label>
-        <div className="hint" style={{ marginBottom: 6 }}>The App Scanner runs a dedicated connector build. Its connector group must use the <strong>AppShield</strong> version profile — this used to be a manual portal step.</div>
+        <div className="hint" style={{ marginBottom: 6 }}>App Shield scanning needs a current connector build. Pick an <strong>AppShield</strong> profile if your tenant lists one; otherwise <strong>New Release</strong> works.</div>
         {profiles === null ? <div className="hint">Loading version profiles...</div> : (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <select value={profileId} onChange={e => setProfileId(e.target.value)} style={{ flex: 1 }}>
@@ -361,7 +362,7 @@ export default function ZPASetup({ data, update, next, back }) {
           </div>
         )}
         {profiles && profiles.length > 0 && !profiles.some(p => /app ?shield|shield|scanner/i.test(p.name)) && (
-          <div className="hint" style={{ color: '#b45309' }}>No profile named AppShield is visible to this tenant. Ask Zscaler to enable Autonomous Application Shield for your tenant, or pick the profile they told you to use.</div>
+          <div className="hint">No AppShield-named profile in this tenant — that’s normal; use <strong>New Release</strong>. (If Private Access has no <em>Autonomous App Shield</em> menu at all, ask Zscaler to enable it for the tenant.)</div>
         )}
         {profileMsg && <div className="hint" style={{ marginTop: 6 }}>{profileMsg}</div>}
       </div>

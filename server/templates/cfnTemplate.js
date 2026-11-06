@@ -12,6 +12,8 @@ function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSi
             Version: '2012-10-17',
             Statement: [{ Effect: 'Allow', Principal: { Service: 'ec2.amazonaws.com' }, Action: 'sts:AssumeRole' }]
           },
+          // Session Manager: shell from the EC2 console, no SSH or inbound ports
+          ManagedPolicyArns: ['arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'],
           Policies: [{
             PolicyName: 'ZPAScannerSSMPolicy',
             PolicyDocument: {

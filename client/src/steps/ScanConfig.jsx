@@ -59,6 +59,20 @@ export default function ScanConfig({ data, update, next, back }) {
       .catch(e => setNetNote('⚠️ Couldn’t check the AWS network rules: ' + (e.response?.data?.error || e.message)))
   }, [])
 
+  // Scanner readiness: link the scanner group to the test apps' server group and turn on
+  // Application Shield Scanning for the scanner connector (otherwise Add Scan finds no scanner)
+  const [prep, setPrep] = useState({ state: 'idle', checks: [] })
+  const prepareScanner = async () => {
+    if (!data.connectorGroupId) { setPrep({ state: 'error', checks: [], error: 'No App Scanner connector group yet — finish the Scanner Key step first.' }); return }
+    setPrep({ state: 'running', checks: [] })
+    try {
+      const r = await axios.post('/api/zpa/prepare-scanner', { ...zpaAuth(data), scannerGroupId: data.connectorGroupId })
+      setPrep({ state: 'done', ...r.data }); update({ scannerReady: !!r.data.ready })
+      if (r.data.scannerNames?.length) update({ scannerConnectorNames: r.data.scannerNames })
+    } catch (e) { setPrep({ state: 'error', checks: [], error: e.response?.data?.error || e.message }) }
+  }
+  useEffect(() => { prepareScanner() }, [])
+
   const testIp = data.testAppsPrivateIp
   const testSegsExist = segments.some(s => (s.domainNames || []).includes(testIp))
 
@@ -110,6 +124,22 @@ export default function ScanConfig({ data, update, next, back }) {
       </div>
 
       {netNote && <div className="hint" style={{ marginBottom: 12 }}>{netNote}</div>}
+
+      <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <strong>Scanner readiness</strong>
+          <button onClick={prepareScanner} disabled={prep.state === 'running'} style={{ fontSize: 12 }}>↻ Check again</button>
+        </div>
+        {prep.state === 'running' && <div className="hint"><span className="spinner spinner-blue" /> Preparing the App Scanner in ZPA...</div>}
+        {prep.state === 'error' && <div className="alert alert-error" style={{ marginTop: 8 }}><span>⚠️ {prep.error}</span></div>}
+        {prep.checks.map(c => (
+          <div key={c.id} style={{ display: 'flex', gap: 8, fontSize: 13, padding: '3px 0' }}>
+            <span>{c.ok ? '✅' : '❌'}</span>
+            <div><strong>{c.label}</strong>{c.detail ? <div style={{ color: '#64748b' }}>{c.detail}</div> : null}</div>
+          </div>
+        ))}
+        {prep.state === 'done' && !prep.ready && <div className="hint" style={{ marginTop: 6 }}>Create the scan once these are green — a scan created earlier can land on a connector that never runs it, and ZPA then blocks new requests for those segments for 12 hours.</div>}
+      </div>
 
       {testIp && !testSegsExist && !loadingSegs && (
         <div className="alert alert-warning" style={{ marginBottom: 12 }}>
@@ -179,9 +209,16 @@ export default function ScanConfig({ data, update, next, back }) {
         <div className="alert alert-error" style={{ display: 'block' }}>
           ⚠️ {error}
           {apiFailed && (
-            <div style={{ marginTop: 6 }}>
-              Zscaler doesn’t document an API for creating App Shield scans, so this call may not be supported on your tenant.
-              Create the scan in the <a href={zpaPortalBase(data)} target="_blank" rel="noreferrer">ZPA Admin Portal</a> instead, then continue.
+            <div style={{ marginTop: 6, color: '#334155' }}>
+              Zscaler doesn’t document an API for creating App Shield scans, so create it in the portal — about a minute:
+              <ol style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                <li>Experience Center → <strong>Private Access → Autonomous App Shield → Scans → Add</strong>.</li>
+                <li>Name <strong>{scanName}</strong>, Status Enable, <strong>New Scan Profile</strong>: name <strong>{scanName} - {PROBING.find(p => p.level === probingLevel)?.label}</strong>, intensity <strong>{PROBING.find(p => p.level === probingLevel)?.label}</strong>, interval <strong>{frequency.charAt(0) + frequency.slice(1).toLowerCase()}</strong>, start <strong>{startTime} UTC</strong>.</li>
+                <li>Application Segments: <strong>{segments.filter(x => selectedSegments.includes(x.id)).map(x => x.name).join(', ') || '(the ones ticked above)'}</strong>.</li>
+                <li>App Scanner: <strong>{(data.scannerConnectorNames || []).join(' / ') || 'the ZPA-AppScanner-Key connector'}</strong> — not the traffic connector. If the list says “No Scanners available”, the readiness checks above aren’t green yet.</li>
+                <li>Save, then press <strong>▷</strong> on the scan’s row to run it now. Results appear under <strong>Autonomous App Shield → Shield</strong> (download the report, then <strong>Protection</strong> for recommended controls).</li>
+              </ol>
+              <div className="hint" style={{ marginTop: 6 }}>If a run stays at “Requested” and a new run says “An active scan request for this app segment already exists within the last 12 hours”, add a second segment for the same VM using its private DNS name (e.g. ip-172-31-93-7.ec2.internal, ports 80 and 3000, same segment and server group) and scan that.</div>
             </div>
           )}
         </div>

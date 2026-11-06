@@ -274,8 +274,11 @@ router.post('/traffic-connector', async (req, res) => {
     const srv = await findByName(base, headers, 'serverGroup', TEST_SERVER_GROUP);
     if (srv) {
       const full = (await axios.get(`${base}/serverGroup/${srv.id}`, { headers, timeout: 15000 })).data;
-      if (!(full.appConnectorGroups || []).some(g => g.id === group.id) || (full.appConnectorGroups || []).length !== 1) {
-        await axios.put(`${base}/serverGroup/${srv.id}`, { ...full, appConnectorGroups: [{ id: group.id }] }, { headers, timeout: 15000 });
+      // Add, never replace: the App Scanner group must stay in this server group or
+      // App Shield offers no scanner for the test apps' segments.
+      const current = full.appConnectorGroups || [];
+      if (!current.some(g => String(g.id) === String(group.id))) {
+        await axios.put(`${base}/serverGroup/${srv.id}`, { ...full, appConnectorGroups: [...current.map(g => ({ id: g.id })), { id: group.id }] }, { headers, timeout: 15000 });
         steps.push(`Server group "${TEST_SERVER_GROUP}" now uses "${TRAFFIC_GROUP}"`);
       }
     }
@@ -283,6 +286,106 @@ router.post('/traffic-connector', async (req, res) => {
     res.json({ groupId: group.id, provisioningKey: key.provisioningKey, steps });
   } catch (err) {
     console.error('[traffic-connector error]', stage, err.response?.status, JSON.stringify(err.response?.data));
+    res.status(400).json({ error: `Failed while ${stage}: ${zpaError(err)}` });
+  }
+});
+
+// ─── App Shield scanner readiness ────────────────────────────────────────────
+// App Shield only offers a scanner for an app segment when (1) the scanner's connector
+// group is in the segment's server group and (2) "Application Shield Scanning" is on for
+// the scanner connector. Without both, Add Scan shows "No Scanners available", or a scan
+// lands on a traffic connector that can't run it and sits at "Requested" — and ZPA then
+// refuses new requests for that segment for 12 hours. Zscaler doesn't document the
+// connector field, so find it by name on the connector object and only flip a value that
+// is recognisably on/off.
+const SHIELD_FIELD = /shield|appscan/i;
+function toggled(value, on) {
+  if (typeof value === 'boolean') return on;
+  if (typeof value === 'number') return on ? 1 : 0;
+  const v = String(value);
+  if (/^(true|false)$/i.test(v)) return on ? 'true' : 'false';
+  if (/^[01]$/.test(v)) return on ? '1' : '0';
+  if (/^(enabled|disabled)$/i.test(v)) return on ? 'ENABLED' : 'DISABLED';
+  return undefined;
+}
+const isOn = (v) => v === true || v === 1 || /^(true|1|enabled)$/i.test(String(v));
+
+async function listConnectors(base, headers) {
+  const conns = [];
+  for (let page = 1; page <= 10; page++) {
+    const r = await axios.get(`${base}/connector`, { headers, params: { page, pagesize: 500 }, timeout: 15000 });
+    conns.push(...(r.data.list || []));
+    if (page >= (parseInt(r.data.totalPages, 10) || 1)) break;
+  }
+  return conns;
+}
+
+async function setShieldScanning(base, headers, conn, on) {
+  const full = (await axios.get(`${base}/connector/${conn.id}`, { headers, timeout: 15000 })).data;
+  const key = Object.keys(full).find(k => SHIELD_FIELD.test(k) && toggled(full[k], on) !== undefined);
+  if (!key) return { changed: false, unknown: true };
+  if (isOn(full[key]) === on) return { changed: false, key };
+  await axios.put(`${base}/connector/${conn.id}`, { ...full, [key]: toggled(full[key], on) }, { headers, timeout: 15000 });
+  return { changed: true, key };
+}
+
+// POST /api/zpa/prepare-scanner { ...auth, scannerGroupId } — idempotent
+router.post('/prepare-scanner', async (req, res) => {
+  const { scannerGroupId } = req.body;
+  let stage = 'connecting to ZPA';
+  try {
+    if (!scannerGroupId) throw new Error('No App Scanner connector group yet — finish the Scanner Key step first.');
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    const checks = [];
+
+    stage = 'linking the scanner to the test apps';
+    const srv = await findByName(base, headers, 'serverGroup', TEST_SERVER_GROUP);
+    if (!srv) checks.push({ id: 'servergroup', ok: false, label: `Scanner linked to server group "${TEST_SERVER_GROUP}"`, detail: 'Server group not found — run Publish first.' });
+    else {
+      const full = (await axios.get(`${base}/serverGroup/${srv.id}`, { headers, timeout: 15000 })).data;
+      const current = full.appConnectorGroups || [];
+      let detail = 'Already linked';
+      if (!current.some(g => String(g.id) === String(scannerGroupId))) {
+        await axios.put(`${base}/serverGroup/${srv.id}`, { ...full, appConnectorGroups: [...current.map(g => ({ id: g.id })), { id: scannerGroupId }] }, { headers, timeout: 15000 });
+        detail = 'Added the App Scanner connector group';
+      }
+      checks.push({ id: 'servergroup', ok: true, label: `Scanner linked to server group "${TEST_SERVER_GROUP}"`, detail });
+    }
+
+    stage = 'checking the scanner connector';
+    const conns = await listConnectors(base, headers);
+    const scanners = conns.filter(c => String(c.appConnectorGroupId) === String(scannerGroupId));
+    const online = (s = '') => /AUTHENTICATED|ONLINE/i.test(s) || (/CONNECTED/i.test(s) && !/DISCONNECTED/i.test(s));
+    checks.push({
+      id: 'online', ok: scanners.some(c => online(c.controlChannelStatus)), label: 'App Scanner connector online',
+      detail: scanners.length ? scanners.map(c => `${c.name}: ${c.controlChannelStatus || 'unknown'}${c.currentVersion ? ' · ' + c.currentVersion : ''}`).join('; ')
+        : 'No connector has enrolled in the scanner group yet (5–10 minutes after the VM starts; it may also restart once to upgrade).',
+    });
+
+    stage = 'turning on Application Shield Scanning';
+    const manual = [];
+    for (const c of scanners) {
+      try {
+        const r = await setShieldScanning(base, headers, c, true);
+        if (r.unknown) manual.push(c.name);
+        else checks.push({ id: 'shield-' + c.id, ok: true, label: `Application Shield Scanning on for ${c.name}`, detail: r.changed ? 'Turned on' : 'Already on' });
+      } catch (e) { manual.push(`${c.name} (${zpaError(e)})`); }
+    }
+    if (manual.length) checks.push({ id: 'shield-manual', ok: false, label: 'Application Shield Scanning on the scanner connector',
+      detail: `Couldn't set it through the API for ${manual.join(', ')}. Portal: Private Access → App Connectors → the AppScanner connector → Edit → Application Shield Scanning: Enabled.` });
+
+    // Keep traffic connectors out of scanning: a scan assigned to one never starts.
+    stage = 'checking the traffic connectors';
+    const trafficGroup = await findByName(base, headers, 'appConnectorGroup', TRAFFIC_GROUP);
+    for (const c of conns.filter(c => trafficGroup && String(c.appConnectorGroupId) === String(trafficGroup.id))) {
+      try {
+        const r = await setShieldScanning(base, headers, c, false);
+        if (r.changed) checks.push({ id: 'traffic-' + c.id, ok: true, label: `Application Shield Scanning off for ${c.name}`, detail: 'Traffic connectors can’t run scans' });
+      } catch { /* best effort */ }
+    }
+
+    res.json({ checks, ready: checks.every(c => c.ok), scannerNames: scanners.map(c => c.name) });
+  } catch (err) {
     res.status(400).json({ error: `Failed while ${stage}: ${zpaError(err)}` });
   }
 });

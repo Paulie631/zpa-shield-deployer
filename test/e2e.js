@@ -31,7 +31,9 @@ async function verify(p,tag){console.log(tag,'step:',await h2(p));await p.getByT
 async function scanToDone(p,tag){
  console.log(tag,'step:',await h2(p));
  await p.getByText('DVWA',{exact:true}).waitFor({timeout:15000});await p.getByText('DVWA',{exact:true}).click();
- await p.getByRole('button',{name:/Create Scan/}).click();await p.getByText('doesn’t document an API').waitFor({timeout:15000});
+ await p.getByText('Application Shield Scanning on for ZPA-AppScanner-Key-1').waitFor({timeout:20000}).catch(async e=>{console.log('CARD:',(await p.locator('.card').first().innerText()).slice(0,1500));throw e;});await p.getByText('Added the App Scanner connector group').or(p.getByText('Already linked')).first().waitFor({timeout:5000});
+ console.log(tag,'scanner readiness:',(await p.locator('.card').first().innerText()).split(String.fromCharCode(10)).filter(l=>/Scanner linked|connector online|Shield Scanning|Added the|Already|Turned on/.test(l)).join(' | '));
+ await p.getByRole('button',{name:/Create Scan/}).click();await p.getByText('doesn’t document an API').waitFor({timeout:15000});await p.getByText('Autonomous App Shield → Scans → Add').waitFor({timeout:5000});
  await p.screenshot({path:OUT+'/'+tag+'-scan.png',fullPage:true});
  await p.getByRole('button',{name:/create it in the portal/}).click();
  console.log(tag,'step:',await h2(p));
