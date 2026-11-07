@@ -435,6 +435,9 @@ router.post('/vms/:vmId/check-apps', async (req, res) => {
     // Windows: PowerShell via -EncodedCommand (UTF-16LE base64) so nothing needs quoting
     const ps = [
       "$ErrorActionPreference = 'SilentlyContinue'",
+      // the test apps' TLS endpoints use a self-signed certificate
+      "[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }",
+      "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls11 -bor [System.Net.SecurityProtocolType]::Tls",
       "$svc = Get-Service | Where-Object { $_.DisplayName -like '*Zscaler*' } | ForEach-Object { $_.DisplayName + '=' + $_.Status }",
       "'ZCC: ' + ($svc -join '; ')",
       `foreach ($u in @(${clean.map(u => `'${u}'`).join(',')})) {`,
@@ -449,7 +452,7 @@ router.post('/vms/:vmId/check-apps', async (req, res) => {
     } catch (e) { /* not Windows (or PowerShell unavailable) — try Linux */ }
     const sh = [
       'echo "ZCC: $(systemctl is-active zsaservice 2>/dev/null || pgrep -fl -i zscaler | head -1 || echo not found)"',
-      ...clean.map(u => `echo "URL ${u} -> $(curl -s -o /dev/null -m 20 -w '%{http_code}' '${u}' || echo ERROR)"`),
+      ...clean.map(u => `echo "URL ${u} -> $(curl -sk -o /dev/null -m 20 -w '%{http_code}' '${u}' || echo ERROR)"`),
     ].join('\n');
     const out = await runInline(apiId, apiKey, req.params.vmId, sh, 120000);
     res.json({ os: 'linux', ...parse(out.stdout) });

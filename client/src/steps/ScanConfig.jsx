@@ -77,7 +77,7 @@ export default function ScanConfig({ data, update, next, back }) {
   const testSegsExist = segments.some(s => (s.domainNames || []).includes(testIp))
 
   const [selectedSegments, setSelectedSegments] = useState(data.selectedSegmentIds || [])
-  const [probingLevel, setProbingLevel] = useState(data.probingLevel || 'MEDIUM')
+  const [probingLevel, setProbingLevel] = useState(data.probingLevel || 'HIGH')
   const [frequency, setFrequency] = useState(data.frequency || 'WEEKLY')
   const [startTime, setStartTime] = useState(data.startTime || '02:00')
   const [scanName, setScanName] = useState(data.scanName || 'Shield Scan')
@@ -156,7 +156,7 @@ export default function ScanConfig({ data, update, next, back }) {
           <div className="alert alert-error"><span>⚠️ Couldn’t load app segments: {segError} <button onClick={loadSegments} style={{ marginLeft: 8, fontSize: 12 }}>↻ Retry</button></span></div>
         ) : segments.length === 0 ? (
           <div className="alert alert-warning">
-            <span>⚠️ No app segments found in your ZPA tenant.{data.testAppsPrivateIp ? <> Create two for the test apps at <strong>{data.testAppsPrivateIp}</strong> — DVWA on port 80 and Juice Shop on port 3000 — </> : ' Create them '}
+            <span>⚠️ No app segments found in your ZPA tenant.{data.testAppsPrivateIp ? <> Run the Publish step to create them for the test apps at <strong>{data.testAppsPrivateIp}</strong> — </> : ' Create them '}
             in the <a href={`${zpaPortalBase(data)}`} target="_blank" rel="noreferrer">ZPA Admin Portal</a>, then <button onClick={loadSegments} style={{ fontSize: 12 }}>↻ Reload</button></span>
           </div>
         ) : (
@@ -220,7 +220,7 @@ export default function ScanConfig({ data, update, next, back }) {
               <li>App Scanner: <strong>{(data.scannerConnectorNames || []).join(' / ') || 'the ZPA-AppScanner-Key connector'}</strong> — never the traffic connector. If the list says “No Scanners available for the selected Application Segments”, the readiness checks above aren’t green yet.</li>
               <li>Save, then press <strong>▷</strong> on the scan’s row to run it now. Watch it under <strong>Autonomous App Shield → Shield</strong>: Requested → In Progress → Completed (High ≈ 10–90 min). Then <strong>Download Report</strong>, and <strong>Protection</strong> to deploy the recommended controls.</li>
             </ol>
-            <div className="hint" style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>Stuck at “Requested” for 15+ minutes, or “An active scan request for this app segment already exists within the last 12 hours”? That segment is locked by an earlier request. Add a second segment for the same VM using its private DNS name <code>{dnsName}</code> (ports 80 and 3000, segment group and server group “ZPA Shield Test Apps”) and scan that instead.</div>
+            <div className="hint" style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>Stuck at “Requested” for 15+ minutes, or “An active scan request for this app segment already exists within the last 12 hours”? That segment is locked by an earlier request. Add a second segment for the same VM using its private DNS name <code>{dnsName}</code> (same ports, segment group and server group “ZPA Shield Test Apps”) and scan that instead.</div>
           </div>
         )
       })()}

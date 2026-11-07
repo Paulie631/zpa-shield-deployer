@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
+import { TEST_APPS, urlFor } from '../lib/testApps'
 import { zpaAuth, zpaPortalBase } from '../lib/zpa'
 import { loadCSCreds, saveCSCreds, csSecretSaved, PROJECT_ID, POLICY_ID, REGION_MIAMI, looksLikeZccBlueprint } from '../lib/cloudshare'
 
@@ -10,8 +11,8 @@ import { loadCSCreds, saveCSCreds, csSecretSaved, PROJECT_ID, POLICY_ID, REGION_
 //   C. a manual check in that VM's browser
 export default function VerifyAccess({ data, update, next, back }) {
   const ip = data.testAppsPrivateIp
-  const urls = ip ? [`http://${ip}/`, `http://${ip}:3000/`] : []
-  const labels = { [`http://${ip}/`]: 'DVWA', [`http://${ip}:3000/`]: 'Juice Shop' }
+  const urls = ip ? TEST_APPS.map(a => urlFor(ip, a)) : []
+  const labels = Object.fromEntries(TEST_APPS.map(a => [urlFor(ip, a), a.short]))
 
   // ── A. ZPA checks
   const [zpa, setZpa] = useState({ state: 'idle', checks: [] })
@@ -142,7 +143,10 @@ export default function VerifyAccess({ data, update, next, back }) {
   const [manual, setManual] = useState(data.manualVerify || '')
   const setManualResult = (v) => { setManual(v); update({ manualVerify: v }) }
 
-  const clientOk = check?.state === 'done' && check.results?.every(r => r.ok)
+  // The two native endpoints (DVWA :80, Juice Shop :3000) prove the ZPA path; the TLS/alias
+  // endpoints and WebGoat are reported but don't gate the step (self-signed certs, slow Java start).
+  const coreUrls = ip ? TEST_APPS.filter(a => a.key === 'dvwa' || a.key === 'juice').map(a => urlFor(ip, a)) : []
+  const clientOk = check?.state === 'done' && coreUrls.every(u => check.results?.find(r => r.url === u)?.ok)
   const verified = clientOk || manual === 'works'
   const failedCheck = zpa.checks.find(c => !c.ok)
 
@@ -197,10 +201,10 @@ export default function VerifyAccess({ data, update, next, back }) {
                     {entitling.hasZpa ? '✅ Private Access is now on for this user — have them Log Out and sign in again in Client Connector.' : entitling.portalStep}</span>
                   </div>
                 )}
-                {userCheck.hasZpa && userInRuleGroup && <div className="hint" style={{ marginTop: 6 }}>✅ This user should get access. If Client Connector shows no Private Access tab, Log Out and sign in again (entitlement changes apply at sign-in), then open <code>http://{ip}</code> and click “Both apps load” below.</div>}
+                {userCheck.hasZpa && userInRuleGroup && <div className="hint" style={{ marginTop: 6 }}>✅ This user should get access. If Client Connector shows no Private Access tab, Log Out and sign in again (entitlement changes apply at sign-in), then open <code>http://{ip}</code> and click “The apps load” below.</div>}
               </div>
             )}
-            <div className="hint" style={{ marginTop: 6 }}>Quickest proof: sign in to Client Connector on any Mac or PC outside the VPC (your personal laptop works) with that user and open <code>http://{ip}</code> — then click “Both apps load” below.</div>
+            <div className="hint" style={{ marginTop: 6 }}>Quickest proof: sign in to Client Connector on any Mac or PC outside the VPC (your personal laptop works) with that user and open <code>http://{ip}</code> — then click “The apps load” below.</div>
           </div>
         )}
       </div>
@@ -268,9 +272,9 @@ export default function VerifyAccess({ data, update, next, back }) {
       {/* C */}
       <div style={box}>
         <strong>3. Check it yourself</strong>
-        <div className="hint">On any device with Client Connector signed in to this tenant — the test VM above, or your own laptop — open <code>http://{ip || '…'}</code> (DVWA login page) and <code>http://{ip || '…'}:3000</code> (Juice Shop).</div>
+        <div className="hint">On any device with Client Connector signed in to this tenant — the test VM above, or your own laptop — open <code>http://{ip || '…'}</code> (DVWA login page) and <code>http://{ip || '…'}:3000</code> (Juice Shop). Those two prove the path; the other endpoints (<code>https://{ip || '…'}</code>, <code>:8080</code>, <code>:8443</code>, <code>:8081</code> WebGoat) use the same rule. The TLS ones use a self-signed certificate, so expect a browser warning.</div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <button className={`btn ${manual === 'works' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setManualResult('works')}>✅ Both apps load</button>
+          <button className={`btn ${manual === 'works' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setManualResult('works')}>✅ The apps load</button>
           <button className={`btn ${manual === 'fails' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setManualResult('fails')}>❌ They don’t load</button>
         </div>
         {manual === 'fails' && (

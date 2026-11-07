@@ -216,10 +216,7 @@ router.post('/scan', async (req, res) => {
 // POST /api/zpa/test-app-segments — create everything ZPA needs to publish the test apps:
 // a segment group, a server group (bound to an App Connector group) and one app segment per app.
 // Re-running is safe: objects with the same names are reused, not duplicated.
-const TEST_APPS = [
-  { name: 'ZPA Shield - DVWA', port: 80 },
-  { name: 'ZPA Shield - Juice Shop', port: 3000 },
-];
+const { TEST_APPS } = require('../lib/testApps');
 const TEST_SEGMENT_GROUP = 'ZPA Shield Test Apps';
 const TEST_SERVER_GROUP = 'ZPA Shield Test Apps';
 

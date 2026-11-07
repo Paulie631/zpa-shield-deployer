@@ -1,6 +1,6 @@
 # ZPA Shield Deployer
 
-A wizard UI for deploying **ZPA Autonomous Application Shield** to AWS or CloudShare — with test app deployment (DVWA + OWASP Juice Shop) built in.
+A wizard UI for deploying **ZPA Autonomous Application Shield** to AWS or CloudShare — with test app deployment (DVWA, OWASP Juice Shop and WebGoat, each also behind TLS / on standard ports) built in.
 
 ![ZPA Shield Deployer](https://img.shields.io/badge/ZPA-Shield%20Deployer-0066CC?style=for-the-badge&logo=zscaler)
 ![Version](https://img.shields.io/github/v/release/Paulie631/zpa-shield-deployer?style=for-the-badge)
@@ -17,7 +17,7 @@ A 9-step guided wizard that automates the full ZPA App Shield deployment:
 | 1 | Connect to your ZPA tenant (OneAPI/Zidentity, API key or OAuth) and enter the numeric ZPA Customer ID once |
 | 2 | Choose AWS or CloudShare |
 | 3 | Configure your AWS environment — pick an AWS CLI profile (SSO sessions refresh themselves) or paste keys — plus VPC and subnet (key pair optional — the instances run the Session Manager agent, so EC2 → Connect gives a shell); or pick your CloudShare VMs |
-| 4 | Deploy DVWA + OWASP Juice Shop as vulnerable test apps |
+| 4 | Deploy the vulnerable test apps: DVWA, OWASP Juice Shop, WebGoat, plus an nginx TLS front door (six endpoints) |
 | 5 | **Publish them through ZPA:** a traffic App Connector (deployed on AWS), app segments for both apps, and an access policy rule |
 | 6 | **Verify access:** ZPA-side checks (connector online, segments, rule); a Zidentity check of the user you sign in to Client Connector with (exists, covered by the rule, Private Access entitlement — one click adds them to the `ZPA Shield Test Users` group, which you link to the Private Access entitlement once in the portal); then a CloudShare VM with Zscaler Client Connector opens both apps, plus a manual check |
 | 7 | Create or pick the App Scanner's connector group + provisioning key |
@@ -104,7 +104,7 @@ API Routes:
   /api/aws/resources         Fetch VPCs, subnets, key pairs from EC2
   /api/aws/deploy            Launch App Scanner CloudFormation stack
   /api/aws/stack-status      Poll CFN stack status
-  /api/aws/deploy-test-apps  Launch DVWA + Juice Shop EC2 instance
+  /api/aws/deploy-test-apps  Launch the test-apps EC2 instance (DVWA, Juice Shop, WebGoat, nginx TLS)
   /api/cloudshare/script     Generate pre-filled bash setup script
 ```
 
@@ -122,12 +122,18 @@ API Routes:
 
 ## Test Applications
 
-The wizard can deploy two intentionally vulnerable apps for scanning:
+The wizard deploys three intentionally vulnerable apps on one VM and exposes them as **six endpoints**, each with its own ZPA app segment. App Shield fingerprints by port, runs a TLS phase and matches CVEs by detected software version, so the same app on a standard port, behind TLS and on its native port gives the scanner far more to report than two bare HTTP ports did.
 
-| App | Port | Vulnerabilities |
-|-----|------|----------------|
-| [DVWA](https://github.com/digininja/DVWA) | 80 | SQLi, XSS, CSRF, File Inclusion, Command Injection, Path Traversal |
-| [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) | 3000 | 100+ OWASP Top 10 vulns — realistic e-commerce app |
+| Segment | Port | What's behind it |
+|---------|------|------------------|
+| ZPA Shield - DVWA | 80 | [DVWA](https://github.com/digininja/DVWA) on a dated Apache/PHP image |
+| ZPA Shield - DVWA (TLS) | 443 | nginx 1.18 (TLS 1.0–1.2, self-signed) → DVWA |
+| ZPA Shield - Juice Shop | 3000 | [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) v13.3.0 (2022) |
+| ZPA Shield - Juice Shop (HTTP 8080) | 8080 | nginx → Juice Shop on a standard web port (avoids the “ppp” fingerprint on 3000) |
+| ZPA Shield - Juice Shop (TLS) | 8443 | nginx TLS → Juice Shop |
+| ZPA Shield - WebGoat | 8081 | [OWASP WebGoat](https://github.com/WebGoat/WebGoat) v2023.4 — a Java/Spring stack |
+
+Images are pinned to older builds on purpose (`server/lib/testApps.js`). To get more findings still: scan each segment separately at **High** intensity, and ask the AAS team about authenticated scanning — most of DVWA's and Juice Shop's intended flaws sit behind a login.
 
 ---
 
@@ -142,7 +148,7 @@ The wizard can deploy two intentionally vulnerable apps for scanning:
 ### Test Apps Stack (`zpa-test-apps`)
 - EC2 instance: RHEL 9, t3.medium, 40 GB gp3
 - Security group (outbound only)
-- DVWA + Juice Shop via Docker (auto-start on boot)
+- DVWA, Juice Shop, WebGoat and an nginx TLS front door via Docker (auto-start on boot)
 
 > ℹ️ **AMI:** the wizard looks up the latest official RHEL 9 AMI (Red Hat's AWS account) in your chosen region, so the AWS keys need `ec2:DescribeImages`.
 

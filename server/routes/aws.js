@@ -86,9 +86,9 @@ async function vpcCidr(ec2, vpcId) {
 }
 
 // Network paths the scan needs inside the VPC:
-//   test apps  <- tcp 80 / 3000 from the VPC (scanner + App Connectors reach apps directly)
+//   test apps  <- the test-app ports from the VPC (scanner + App Connectors reach apps directly)
 //   scanner    -> anything in the VPC (it probes the apps' ports)
-const TEST_APP_PORTS = [80, 3000];
+const { TEST_APPS, TEST_APP_PORTS } = require('../lib/testApps');
 function testAppsIngress(cidr) {
   return TEST_APP_PORTS.map(p => ({ IpProtocol: 'tcp', FromPort: p, ToPort: p, CidrIp: cidr, Description: `Test app port ${p} from the VPC` }));
 }
@@ -257,7 +257,7 @@ router.post('/deploy-test-apps', async (req, res) => {
         TestAppsSecurityGroup: {
           Type: 'AWS::EC2::SecurityGroup',
           Properties: {
-            GroupDescription: 'ZPA Test Apps - ports 80 and 3000 from inside the VPC only',
+            GroupDescription: `ZPA Test Apps - ports ${TEST_APP_PORTS.join('/')} from inside the VPC only`,
             VpcId: vpcId,
             SecurityGroupIngress: testAppsIngress(cidr),
             SecurityGroupEgress: [{ IpProtocol: '-1', CidrIp: '0.0.0.0/0' }]
@@ -293,10 +293,7 @@ router.post('/deploy-test-apps', async (req, res) => {
     res.json({
       stackName: finalStackName,
       consoleUrl: `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks`,
-      apps: [
-        { name: 'DVWA', port: 80, domain: 'dvwa.internal' },
-        { name: 'Juice Shop', port: 3000, domain: 'juiceshop.internal' }
-      ]
+      apps: TEST_APPS.map(a => ({ name: a.name.replace('ZPA Shield - ', ''), port: a.port, scheme: a.scheme }))
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

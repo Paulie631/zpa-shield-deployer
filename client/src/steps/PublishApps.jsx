@@ -190,7 +190,7 @@ export default function PublishApps({ data, update, next, back }) {
           </div>
         ))} />
       <Part n={2} title="App segments" part={segs} onRetry={() => doSegments().catch(() => {})}
-        desc={<>“ZPA Shield - DVWA” ({ip || '?'}:80) and “ZPA Shield - Juice Shop” ({ip || '?'}:3000), in segment group “ZPA Shield Test Apps”.</>} />
+        desc={<>Six segments at {ip || '?'}, in segment group “ZPA Shield Test Apps”: DVWA (80, TLS 443), Juice Shop (3000, HTTP 8080, TLS 8443) and WebGoat (8081). One segment per endpoint gives App Shield distinct targets to fingerprint and keeps ZPA’s per-segment scan lock from blocking everything at once.</>} />
       <Part n={3} title="Access policy rule" part={rule} onRetry={() => doRule().catch(() => {})}
         desc={<>“ZPA Shield - allow test apps” — lets users reach the ZPA Shield Test Apps segment group.</>}
         extra={(
@@ -208,7 +208,7 @@ export default function PublishApps({ data, update, next, back }) {
 
       {allDone && (
         <div className="alert alert-success">
-          <span>🎉 Published. Once {isAWS ? 'the traffic connector shows as connected in ZPA' : 'your connector is healthy'}, users with Client Connector can open http://{ip} (DVWA) and http://{ip}:3000 (Juice Shop).</span>
+          <span>🎉 Published. Once {isAWS ? 'the traffic connector shows as connected in ZPA' : 'your connector is healthy'}, users with Client Connector can open http://{ip} (DVWA), http://{ip}:3000 (Juice Shop), http://{ip}:8081 (WebGoat) and the TLS/8080 aliases.</span>
         </div>
       )}
 

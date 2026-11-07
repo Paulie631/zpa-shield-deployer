@@ -2,9 +2,12 @@ import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import { awsAuth } from '../lib/aws'
 
+import { TEST_APPS, PORT_LIST } from '../lib/testApps'
+
 const APPS = [
-  { name: 'DVWA', icon: '🎯', port: 80, domain: 'dvwa.internal', desc: 'Damn Vulnerable Web App — SQLi, XSS, CSRF, File Inclusion, Command Injection, Path Traversal', color: '#FEE2E2' },
-  { name: 'Juice Shop', icon: '🥤', port: 3000, domain: 'juiceshop.internal', desc: 'OWASP Juice Shop — 100+ intentional vulns across OWASP Top 10. Looks like a real e-commerce app.', color: '#FEF3C7' }
+  { name: 'DVWA', icon: '🎯', port: 80, extra: '+ TLS on 443', desc: 'Damn Vulnerable Web App on a dated Apache/PHP stack — SQLi, XSS, CSRF, file inclusion, command injection.', color: '#FEE2E2' },
+  { name: 'Juice Shop', icon: '🥤', port: 3000, extra: '+ HTTP on 8080, TLS on 8443', desc: 'OWASP Juice Shop (2022 build) — 100+ intentional flaws across the OWASP Top 10, in a realistic e-commerce app.', color: '#FEF3C7' },
+  { name: 'WebGoat', icon: '🐐', port: 8081, extra: '', desc: 'OWASP WebGoat — a Java/Spring stack with its own set of lessons and known CVEs, for a third server fingerprint.', color: '#E0F2FE' },
 ]
 
 export default function DeployTestApps({ data, update, next, back }) {
@@ -145,7 +148,7 @@ export default function DeployTestApps({ data, update, next, back }) {
     <div className="card">
       <h2>🧪 Deploy Test Applications</h2>
       <p className="subtitle">
-        Deploy intentionally vulnerable apps to give the App Scanner something interesting to find. DVWA and OWASP Juice Shop cover the full OWASP Top 10 — perfect for demonstrating Shield in action.
+        Deploy intentionally vulnerable apps to give the App Scanner something to find. Three apps on dated stacks, each also exposed behind a TLS front door and on a standard web port, so App Shield's port fingerprinting, TLS checks and CVE matching all have material to work with — six endpoints, six ZPA segments.
       </p>
 
       <div className="app-cards">
@@ -155,7 +158,7 @@ export default function DeployTestApps({ data, update, next, back }) {
             <div className="app-icon">{app.icon}</div>
             <h4>{app.name}</h4>
             <p>{app.desc}</p>
-            <div className="port">Port {app.port}{privateIp ? ` · http://${privateIp}${app.port === 80 ? '' : ':' + app.port}` : ''}</div>
+            <div className="port">Port {app.port}{app.extra ? ` ${app.extra}` : ''}{privateIp ? ` · http://${privateIp}${app.port === 80 ? '' : ':' + app.port}` : ''}</div>
             {appsUp && (
               <div style={{ marginTop: 8, fontSize: 12, color: '#065f46', fontWeight: 600 }}>✅ Deployed</div>
             )}
@@ -165,7 +168,7 @@ export default function DeployTestApps({ data, update, next, back }) {
 
       {isAWS && (
         <div className="alert alert-info" style={{ marginTop: 4 }}>
-          ℹ️ Deploys a <strong>t3.medium</strong> EC2 instance running RHEL 9 with Docker. DVWA and Juice Shop start automatically. Inbound is limited to ports 80/3000 from inside the VPC (for the traffic connector and the scanner) — users reach it only through ZPA.
+          ℹ️ Deploys a <strong>t3.medium</strong> EC2 instance running RHEL 9 with Docker. DVWA, Juice Shop, WebGoat and an nginx TLS front door start automatically. Inbound is limited to the test-app ports from inside the VPC (for the traffic connector and the scanner) — users reach it only through ZPA.
         </div>
       )}
 
@@ -173,7 +176,7 @@ export default function DeployTestApps({ data, update, next, back }) {
         <div style={{ marginTop: 4, marginBottom: 12, padding: 14, border: '1px solid #bfdbfe', borderRadius: 8, background: '#eff6ff' }}>
           <strong>Deploy on {data.csTestVmName || 'the test apps VM'}</strong>
           <div style={{ fontSize: 13, color: '#475569', margin: '4px 0 10px' }}>
-            Installs Docker on the VM through the CloudShare API and starts DVWA (port 80) and Juice Shop (port 3000). Takes a few minutes while the images download.
+            Installs Docker on the VM through the CloudShare API and starts DVWA, Juice Shop, WebGoat and the nginx TLS front door (ports {PORT_LIST}). Takes a few minutes while the images download.
           </div>
           {data.csTestVmNetOk === false && runState === 'idle' && (
             <div className="alert alert-error" style={{ marginBottom: 10 }}>
@@ -233,7 +236,7 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
 
       {privateIp && (
         <div className="alert alert-success" style={{ marginTop: 12 }}>
-          <span>✅ <strong>Test apps at {privateIp}.</strong> Next, Publish puts them behind ZPA (DVWA on port 80, Juice Shop on port 3000).</span>
+          <span>✅ <strong>Test apps at {privateIp}.</strong> Next, Publish puts all six endpoints behind ZPA (ports {PORT_LIST}).</span>
         </div>
       )}
 
