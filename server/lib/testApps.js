@@ -26,7 +26,7 @@ const IMAGES = {
   webgoat: 'webgoat/webgoat:v2023.4',
   nginx: 'nginx:1.18.0',                  // 2020 nginx as the TLS front door
   httpd: 'httpd:2.4.49',                  // the 2021 path-traversal release — App Shield's own check confirms it
-  tomcat: 'tomcat:8.5.0-jre8',            // early 8.5 line: long version-CVE list, Java fingerprint
+  tomcat: 'tomcat:8.5.4-jre8',            // early 8.5 line (2016): long version-CVE list, Java fingerprint; ships the default webapps
   wordpress: 'wordpress:4.9.0-php7.0-apache', // dated CMS on old PHP; large Nuclei template family
   mysql: 'mysql:5.7',                     // backing store for WordPress (not exposed)
 };
