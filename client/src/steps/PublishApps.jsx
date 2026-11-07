@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
+import ConnectorStatus from '../components/ConnectorStatus'
 import { zpaAuth, zpaPortalBase, savedCustomerId, rememberCustomerId } from '../lib/zpa'
 import { awsAuth } from '../lib/aws'
 
@@ -49,6 +50,7 @@ export default function PublishApps({ data, update, next, back }) {
       const r = await axios.get('/api/aws/stack-status', { params: { ...aws, stackName: TRAFFIC_STACK } })
       const s = r.data.status
       setStack({ status: s, ip: r.data.outputs?.find(o => o.OutputKey === 'PrivateIp')?.OutputValue || '', failures: r.data.failures || [] })
+      if (s === 'CREATE_COMPLETE' && !data.trafficStackCompletedAt) update({ trafficStackCompletedAt: new Date().toISOString() })
       if (/_COMPLETE$|_FAILED$/.test(s)) clearInterval(pollRef.current)
       return s
     } catch { return null }
@@ -153,7 +155,7 @@ export default function PublishApps({ data, update, next, back }) {
   const stackBox = isAWS && stack.status && (
     <div style={{ margin: '8px 0 0 24px', fontSize: 13 }}>
       Stack <code>{TRAFFIC_STACK}</code>: <strong>{stack.status}</strong>{stack.ip ? ` — ${stack.ip}` : ''}
-      {stack.status === 'CREATE_COMPLETE' && <div className="hint">The connector installs itself over the next few minutes and then shows in ZPA under App Connectors, in “ZPA Shield Traffic Connectors”.</div>}
+      {stack.status === 'CREATE_COMPLETE' && <ConnectorStatus data={data} groupNames={['ZPA Shield Traffic Connectors']} startedAt={data.trafficStackCompletedAt} title="Traffic connector in ZPA" />}
       {stack.failures.length > 0 && stack.failures.map((f, i) => <div key={i} style={{ color: '#b91c1c' }}>• {f.resource}: {f.reason}</div>)}
       {/ROLLBACK_COMPLETE|_FAILED$/.test(stack.status) && <div><button onClick={() => doConnector().catch(() => {})} style={{ fontSize: 12, marginTop: 4 }}>↻ Delete failed stack &amp; try again</button></div>}
     </div>

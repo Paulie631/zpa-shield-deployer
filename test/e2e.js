@@ -34,7 +34,7 @@ async function scanToDone(p,tag){
  await p.getByText('DVWA',{exact:true}).waitFor({timeout:15000});await p.getByText('DVWA',{exact:true}).click();
  await p.getByText('Application Shield Scanning on for ZPA-AppScanner-Key-1').waitFor({timeout:20000}).catch(async e=>{console.log('CARD:',(await p.locator('.card').first().innerText()).slice(0,1500));throw e;});await p.getByText('Added the App Scanner connector group').or(p.getByText('Already linked')).first().waitFor({timeout:5000});
  console.log(tag,'scanner readiness:',(await p.locator('.card').first().innerText()).split(String.fromCharCode(10)).filter(l=>/Scanner linked|connector online|Shield Scanning|Added the|Already|Turned on/.test(l)).join(' | '));
- await p.getByText('Autonomous App Shield → Scans → Add').waitFor({timeout:5000});await p.getByRole('button',{name:/Try creating it via API/}).click();await p.getByText('has no API for this on your tenant',{exact:false}).waitFor({timeout:15000});
+ await p.getByText('Autonomous App Shield → Scans → Add').waitFor({timeout:5000});await p.getByText('Scan progress').waitFor({timeout:5000});await p.getByText(/doesn.t expose scan status|no scan-status endpoint|Checking whether/).waitFor({timeout:20000});await p.getByRole('button',{name:/Try creating it via API/}).click();await p.getByText('has no API for this on your tenant',{exact:false}).waitFor({timeout:15000});
  await p.screenshot({path:OUT+'/'+tag+'-scan.png',fullPage:true});
  await p.getByRole('button',{name:/created it in the portal/}).click();
  console.log(tag,'step:',await h2(p));
@@ -72,6 +72,8 @@ async function scanToDone(p,tag){
   await p.waitForTimeout(500);await p.getByRole('button',{name:/Continue|Next/}).last().click();
   console.log('AWS step:',await h2(p));
   await p.waitForTimeout(2000);if(!(await p.getByText('Private IP:').count())){await p.getByRole('button',{name:'🚀 Deploy Test Apps'}).click();}else console.log('AWS: existing test apps stack picked up');await p.getByText('Private IP:').waitFor({timeout:30000});
+  await p.getByText('Endpoint readiness').waitFor({timeout:20000});await p.getByText('probed from the App Scanner').waitFor({timeout:20000});await p.getByText('DVWA and Juice Shop are up',{exact:false}).or(p.getByText('endpoints answer from inside the VPC',{exact:false})).first().waitFor({timeout:20000});
+  console.log('AWS endpoint readiness:',(await p.locator('.card').first().innerText()).split(String.fromCharCode(10)).filter(l=>/🟢|🟡|🔴|of ~|Done in/.test(l)).slice(0,12).join(' | '));
   await p.getByRole('button',{name:'Continue →'}).click();
   await publish(p,'AWS');await verify(p,'AWS');
   console.log('AWS step:',await h2(p));await zpaSetup(p);

@@ -17,12 +17,12 @@ A 9-step guided wizard that automates the full ZPA App Shield deployment:
 | 1 | Connect to your ZPA tenant (OneAPI/Zidentity, API key or OAuth) and enter the numeric ZPA Customer ID once |
 | 2 | Choose AWS or CloudShare |
 | 3 | Configure your AWS environment — pick an AWS CLI profile (SSO sessions refresh themselves) or paste keys — plus VPC and subnet (key pair optional — the instances run the Session Manager agent, so EC2 → Connect gives a shell); or pick your CloudShare VMs |
-| 4 | Deploy the vulnerable test apps: DVWA, OWASP Juice Shop, WebGoat, plus an nginx TLS front door (six endpoints) |
+| 4 | Deploy the vulnerable test apps (nine endpoints), then an **Endpoint readiness** panel probes every one from inside the VPC (via Systems Manager on the App Scanner) with elapsed time vs. a learned estimate and a desktop notification when all answer; Deploy on an existing stack re-runs the apps script over SSM |
 | 5 | **Publish them through ZPA:** a traffic App Connector (deployed on AWS), app segments for both apps, and an access policy rule |
 | 6 | **Verify access:** ZPA-side checks (connector online, segments, rule); a Zidentity check of the user you sign in to Client Connector with (exists, covered by the rule, Private Access entitlement — one click adds them to the `ZPA Shield Test Users` group, which you link to the Private Access entitlement once in the portal); then a CloudShare VM with Zscaler Client Connector opens both apps, plus a manual check |
 | 7 | Create or pick the App Scanner's connector group + provisioning key |
 | 8 | **AWS:** launch the App Scanner via CloudFormation (Session Manager enabled, so EC2 → Connect gives a shell) · **CloudShare:** run the setup script on the VM |
-| 9 | **Scanner readiness** via the API — adds the App Scanner group to the test apps' server group, turns on Application Shield Scanning for the scanner connector (off for traffic connectors) and checks it's online; then configure the scan (ZPA has no scan API, so the wizard gives exact portal steps: Private Access → Autonomous App Shield → Scans) |
+| 9 | **Scan progress** (live when the tenant exposes scan status, otherwise per-scan timers with learned estimates), stale-segment cleanup, and **Scanner readiness** via the API — adds the App Scanner group to the test apps' server group, turns on Application Shield Scanning for the scanner connector (off for traffic connectors) and checks it's online; then configure the scan (ZPA has no scan API, so the wizard gives exact portal steps: Private Access → Autonomous App Shield → Scans) |
 | 10 | Final Experience Center checklist with deep links (items already done through the API are marked) |
 | 11 | Summary + links |
 
@@ -193,4 +193,8 @@ Client Connector can only bring up Private Access if ZPA has an enabled IdP with
 2. Okta (developer.okta.com/signup, Integrator Free Plan) → Directory → People → add the user (password set by admin) → Applications → Applications → Create App Integration → SAML 2.0: Single sign-on URL = SP URL, Audience URI = SP Entity ID, Name ID = EmailAddress, username = Okta username → assign the user → Sign On tab → save the Metadata URL page as XML.
 3. Back in ZPA, upload that XML as the IdP metadata, Single Sign-On: User, Enabled. Edit the same IdP rather than recreating it — the SP URLs are tied to the IdP entry.
 4. In ZCC, Log Out and sign in again; Okta will ask the user to enroll Okta Verify on first sign-in.
+
+## Timing estimates and notifications
+
+Waits (apps starting, connectors enrolling/upgrading, scans picking up and running) show elapsed time against an estimate. Estimates start from measured values and are updated from each real run, stored in `~/.zpa-shield/timings.json`. When a wait finishes the wizard shows a banner and sends a desktop notification (macOS Notification Center; `notify-send` on Linux; a toast on Windows).
 

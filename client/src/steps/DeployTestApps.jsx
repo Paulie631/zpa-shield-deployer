@@ -3,6 +3,7 @@ import axios from 'axios'
 import { awsAuth } from '../lib/aws'
 
 import { TEST_APPS, PORT_LIST } from '../lib/testApps'
+import { ElapsedBar, usePoll, dot, fmt } from '../components/WaitStatus'
 
 const APPS = [
   { name: 'DVWA', icon: '🎯', port: 80, extra: '+ TLS on 443', desc: 'Damn Vulnerable Web App on a dated Apache/PHP stack — SQLi, XSS, CSRF, file inclusion, command injection.', color: '#FEE2E2' },
@@ -15,6 +16,7 @@ const APPS = [
 
 export default function DeployTestApps({ data, update, next, back }) {
   const [deploying, setDeploying] = useState(false)
+  const [rerun, setRerun] = useState(null)
   const [stackStatus, setStackStatus] = useState('')
   const [privateIp, setPrivateIp] = useState('')
   const [error, setError] = useState('')
@@ -86,7 +88,7 @@ export default function DeployTestApps({ data, update, next, back }) {
     setError('')
     setFailures([])
     try {
-      await axios.post('/api/aws/deploy-test-apps', {
+      const r = await axios.post('/api/aws/deploy-test-apps', {
         ...awsAuth(data),
         vpcId: data.vpcId,
         subnetId: data.subnetId,
@@ -94,6 +96,8 @@ export default function DeployTestApps({ data, update, next, back }) {
         instanceType: 't3.large',
         stackName: 'zpa-test-apps'
       })
+      setRerun(r.data.rerun || null)
+      update({ testAppsLaunchedAt: r.data.reused ? (data.testAppsLaunchedAt || new Date().toISOString()) : new Date().toISOString() })
       setLaunched(true)
       setStackStatus('CREATE_IN_PROGRESS')
       pollRef.current = setInterval(pollStatus, 5000)
@@ -237,6 +241,14 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
         </div>
       )}
 
+      {rerun && (
+        <div className={`alert ${rerun.needsRecreate ? 'alert-warning' : 'alert-info'}`} style={{ marginTop: 12, display: 'block' }}>
+          {rerun.needsRecreate ? '⚠️ ' : 'ℹ️ '}{rerun.message}
+        </div>
+      )}
+
+      {privateIp && isAWS && <EndpointReadiness data={data} ip={privateIp} />}
+
       {privateIp && (
         <div className="alert alert-success" style={{ marginTop: 12 }}>
           <span>✅ <strong>Test apps at {privateIp}.</strong> Next, Publish puts all nine endpoints behind ZPA (ports {PORT_LIST}).</span>
@@ -271,3 +283,35 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
     </div>
   )
 }
+
+// Which of the test endpoints answer, probed from inside the VPC (the App Scanner or the test-apps
+// VM, over Systems Manager). Doesn't block Continue; polls every 30s until all answer.
+function EndpointReadiness({ data, ip }) {
+  const startedAt = data.testAppsLaunchedAt
+  const poll = usePoll(
+    async () => (await axios.post('/api/aws/probe-test-apps', { ...awsAuth(data), ip, launchedAt: startedAt, notify: true })).data,
+    { every: 30000, until: r => r.ok && r.allUp, enabled: !!ip, notifyText: r => `All ${r.endpoints.length} test endpoints are up at ${ip}`, deps: [ip] }
+  )
+  const r = poll.result
+  const est = r?.estimate || { typical: 420, max: 720 }
+  return (
+    <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, marginTop: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <strong>Endpoint readiness {r?.probedFrom ? <span className="hint">(probed from the {r.probedFrom})</span> : null}</strong>
+        <button onClick={poll.refresh} disabled={poll.status === 'running'} style={{ fontSize: 12 }}>{poll.status === 'running' || poll.status === 'refreshing' ? <span className="spinner spinner-blue" /> : '↻ Check now'}</button>
+      </div>
+      <ElapsedBar startedAt={startedAt} estimate={est} done={!!r?.allUp} label={r?.allUp ? 'All endpoints answering' : 'Waiting for the apps to start'} />
+      {poll.error && <div className="alert alert-error" style={{ marginTop: 6 }}><span>⚠️ {poll.error}</span></div>}
+      {r && !r.ok && <div className="alert alert-warning" style={{ marginTop: 6, display: 'block' }}>🟡 {r.message}</div>}
+      {r?.endpoints && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '4px 12px', marginTop: 8, fontSize: 13 }}>
+          {r.endpoints.map(e => <div key={e.key}>{dot(e.ok)} <code>{e.url}</code> <span className="hint">{e.ok ? `HTTP ${e.code}` : e.code === '000' ? 'not answering yet' : e.code == null ? 'not probed' : `HTTP ${e.code}`}</span></div>)}
+        </div>
+      )}
+      {r?.docker && <div className="hint" style={{ marginTop: 6 }}>Containers: {r.docker.split(';').filter(Boolean).join(' · ')}{r.mem ? ` · memory ${r.mem} MB` : ''}</div>}
+      {r && r.ok && !r.allUp && r.coreUp && <div className="hint" style={{ marginTop: 6 }}>DVWA and Juice Shop are up — enough to continue to Publish. Tomcat and WordPress are usually the last to answer (allow up to {fmt(est.max)} after launch); if an endpoint is still red after that, the container probably failed: EC2 → the instance → Connect → Session Manager → <code>sudo docker ps -a</code>.</div>}
+      {r && r.ok && r.allUp && <div className="hint" style={{ marginTop: 6 }}>✅ All {r.endpoints.length} endpoints answer from inside the VPC — the scanner can reach every one.</div>}
+    </div>
+  )
+}
+

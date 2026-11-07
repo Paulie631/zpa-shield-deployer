@@ -48,11 +48,19 @@ const cf=require(root+'/node_modules/@aws-sdk/client-cloudformation'),e2=require
 let stacks={};
 cf.CloudFormationClient.prototype.send=async c=>{const n=c.constructor.name;AWSCALLS.push(n);
   if(n==='CreateStackCommand'){const t=JSON.parse(c.input.TemplateBody);const inst=Object.values(t.Resources).find(r=>r.Type==='AWS::EC2::Instance');stacks[c.input.StackName]={ami:inst.Properties.ImageId,ud:Buffer.from(inst.Properties.UserData,'base64').toString()};console.log('STACK',c.input.StackName,inst.Properties.ImageId,'userdata has docker-ce:',stacks[c.input.StackName].ud.includes('docker-ce'),'awscli:',stacks[c.input.StackName].ud.includes('awscli'));return {};}
-  if(n==='DescribeStacksCommand') return {Stacks:[{StackStatus:'CREATE_COMPLETE',Outputs:[{OutputKey:'PrivateIp',OutputValue:'172.31.5.5'}]}]};};
+  if(n==='DescribeStacksCommand') return {Stacks:[{StackStatus:'CREATE_COMPLETE',CreationTime:new Date(Date.now()-300000),Outputs:[{OutputKey:'PrivateIp',OutputValue:'172.31.5.5'},{OutputKey:'InstanceId',OutputValue:'i-fake'}]}]};};
 e2.EC2Client.prototype.send=async c=>{const n=c.constructor.name;AWSCALLS.push(n);
   if(n==='DescribeImagesCommand') return {Images:[{ImageId:'ami-old',Name:'RHEL-9.2.0_HVM-2023-x86_64-1-Hourly2-GP2',CreationDate:'2023-05-01'},{ImageId:'ami-new9',Name:'RHEL-9.6.0_HVM-2025-x86_64-1-Hourly2-GP3',CreationDate:'2025-09-01'},{ImageId:'ami-beta',Name:'RHEL-9.7.0_HVM_BETA-2026-x86_64',CreationDate:'2026-01-01'}]};
   if(n==='DescribeVpcsCommand') return {Vpcs:[{VpcId:'vpc-1',CidrBlock:'172.31.0.0/16',IsDefault:true,Tags:[]}]};
   if(n==='DescribeSubnetsCommand') return {Subnets:[{SubnetId:'subnet-1',VpcId:'vpc-1',CidrBlock:'172.31.0.0/20',AvailabilityZone:'us-west-2a',Tags:[]}]};
   if(n==='DescribeKeyPairsCommand') return {KeyPairs:[{KeyName:'paul-key'}]}; return {};};
-sm.SSMClient.prototype.send=async c=>{AWSCALLS.push(c.constructor.name);return {};};
+// SSM: instance is managed; RunShellScript returns the probe lines (all endpoints up on the 2nd call)
+let probeCalls=0;
+sm.SSMClient.prototype.send=async c=>{const n=c.constructor.name;AWSCALLS.push(n);
+  if(n==='DescribeInstanceInformationCommand') return {InstanceInformationList:[{InstanceId:'i-fake',PingStatus:'Online'}]};
+  if(n==='SendCommandCommand') return {Command:{CommandId:'cmd-'+(++probeCalls)}};
+  if(n==='GetCommandInvocationCommand'){const ports=[80,443,3000,8080,8443,8081,8082,8083,8084];const keys=['dvwa','dvwa-tls','juice','juice-8080','juice-tls','webgoat','httpd','tomcat','wordpress'];
+    const out=keys.map((k,i)=>'EP '+k+' '+((probeCalls>1||i<6)?'200':'000')).join(String.fromCharCode(10))+String.fromCharCode(10)+'DOCKER dvwa=Up 5 minutes;juiceshop=Up 5 minutes;'+String.fromCharCode(10)+'MEM 2100/7800';
+    return {Status:'Success',ResponseCode:0,StandardOutputContent:out};}
+  return {};};
 process.chdir(root);require(root+'/server/index.js');

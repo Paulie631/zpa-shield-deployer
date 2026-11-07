@@ -388,8 +388,14 @@ router.post('/prepare-scanner', async (req, res) => {
         else checks.push({ id: 'shield-' + c.id, ok: true, label: `Application Shield Scanning on for ${c.name}`, detail: r.changed ? 'Turned on' : 'Already on' });
       } catch (e) { manual.push(`${c.name} (${zpaError(e)})`); }
     }
-    if (manual.length) checks.push({ id: 'shield-manual', ok: false, label: 'Application Shield Scanning on the scanner connector',
-      detail: `Couldn't set it through the API for ${manual.join(', ')}. Portal: Private Access → App Connectors → the AppScanner connector → Edit → Application Shield Scanning: Enabled.` });
+    if (manual.length) {
+      // ZPA doesn't expose this flag on the connector object under any name we recognise, so we
+      // can't read or set it. The user confirms it once in the portal; we remember that.
+      const confirmed = !!req.body.shieldScanningConfirmed;
+      checks.push({ id: 'shield-manual', ok: confirmed, needsConfirm: !confirmed, label: 'Application Shield Scanning on the scanner connector',
+        detail: confirmed ? 'Confirmed by you in the portal (the API doesn’t expose this setting).'
+          : `The ZPA API doesn’t expose this setting, so the wizard can’t read or set it for ${manual.join(', ')}. Check it once in the portal — Private Access → Private Infrastructure → App Connectors → the AppScanner row → Application Shield Scanning column should say Enabled (pencil → Enabled if not) — then tick “I’ve confirmed it” here.` });
+    }
 
     // Keep traffic connectors out of scanning: a scan assigned to one never starts.
     stage = 'checking the traffic connectors';
@@ -405,6 +411,88 @@ router.post('/prepare-scanner', async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: `Failed while ${stage}: ${zpaError(err)}` });
   }
+});
+
+// POST /api/zpa/connector-status { ...auth, groupNames: [...] } — connectors in the named groups
+// with online state, version, and how long since they enrolled (for elapsed/estimate displays)
+router.post('/connector-status', async (req, res) => {
+  try {
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    const names = req.body.groupNames || [TRAFFIC_GROUP];
+    const groups = [];
+    for (const n of names) { const g = await findByName(base, headers, 'appConnectorGroup', n); if (g) groups.push(g); }
+    const conns = await listConnectors(base, headers);
+    const online = (s = '') => /AUTHENTICATED|ONLINE/i.test(s) || (/CONNECTED/i.test(s) && !/DISCONNECTED/i.test(s));
+    const rows = conns.filter(c => groups.some(g => String(g.id) === String(c.appConnectorGroupId) || g.name === c.appConnectorGroupName)).map(c => ({
+      id: c.id, name: c.name, group: c.appConnectorGroupName || groups.find(g => String(g.id) === String(c.appConnectorGroupId))?.name,
+      online: online(c.controlChannelStatus), status: c.controlChannelStatus || 'unknown', version: c.currentVersion || c.expectedVersion || '',
+      upgrading: !!(c.expectedVersion && c.currentVersion && c.expectedVersion !== c.currentVersion),
+      enrolledAt: c.creationTime ? new Date(Number(c.creationTime) * (String(c.creationTime).length > 10 ? 1 : 1000)).toISOString() : null,
+      lastSeen: c.lastBrokerConnectTime ? new Date(Number(c.lastBrokerConnectTime) * (String(c.lastBrokerConnectTime).length > 10 ? 1 : 1000)).toISOString() : null,
+    }));
+    res.json({ groups: groups.map(g => g.name), connectors: rows });
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
+});
+
+// POST /api/zpa/stale-segments { ...auth, ip } — segments in our group whose host isn't the current test-apps IP
+router.post('/stale-segments', async (req, res) => {
+  try {
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    const sg = await findByName(base, headers, 'segmentGroup', TEST_SEGMENT_GROUP);
+    if (!sg) return res.json({ stale: [] });
+    const all = [];
+    for (let page = 1; page <= 20; page++) {
+      const r = await axios.get(`${base}/application`, { headers, params: { page, pagesize: 500 }, timeout: 15000 });
+      all.push(...(r.data.list || []));
+      if (page >= (parseInt(r.data.totalPages, 10) || 1)) break;
+    }
+    const ip = String(req.body.ip || '');
+    const stale = all.filter(a => String(a.segmentGroupId) === String(sg.id) && !(a.domainNames || []).includes(ip))
+      .map(a => ({ id: a.id, name: a.name, hosts: a.domainNames || [], ports: (a.tcpPortRange || []).map(p => p.from === p.to ? p.from : `${p.from}-${p.to}`) }));
+    res.json({ stale, currentIp: ip });
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
+});
+router.post('/delete-segment', async (req, res) => {
+  try {
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    await axios.delete(`${base}/application/${encodeURIComponent(req.body.id)}?forceDelete=true`, { headers, timeout: 15000 });
+    res.json({ deleted: req.body.id });
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
+});
+
+// POST /api/zpa/scan-status — App Shield scan requests. ZPA documents no API for this; we try the
+// paths the Experience Center UI uses (filled in from a DevTools capture) and remember which works.
+// Returns { supported:false, reason } when none answers, so the UI falls back to timers.
+const SCAN_STATUS_CANDIDATES = (customerId) => [
+  `/mgmtconfig/v1/admin/customers/${customerId}/appShield/scanRequest`,
+  `/mgmtconfig/v1/admin/customers/${customerId}/applicationShield/scanStatus`,
+  `/mgmtconfig/v1/admin/customers/${customerId}/aas/scan`,
+];
+let scanStatusPath = null, scanStatusUnsupportedUntil = 0;
+function normaliseScanRows(d) {
+  const list = Array.isArray(d) ? d : (d?.list || d?.scanRequests || d?.items || []);
+  return list.map(x => ({
+    id: x.id || x.scanId || x.scanRequestId, segment: x.applicationName || x.appSegmentName || x.segmentName || x.applicationSegment?.name || x.name || '',
+    status: x.status || x.scanStatus || x.state || '', startTime: x.startTime ? toIso(x.startTime) : null, endTime: x.endTime ? toIso(x.endTime) : null,
+    requestedAt: toIso(x.requestedTime || x.creationTime || x.createdAt || x.startTime), cves: x.cveCount ?? x.cvesCount ?? x.vulnerabilityCount ?? null,
+  })).filter(r => r.id);
+}
+const toIso = (t) => { if (!t) return null; const n = Number(t); if (!isNaN(n)) return new Date(n * (String(Math.trunc(n)).length > 10 ? 1 : 1000)).toISOString(); const d = new Date(t); return isNaN(d) ? null : d.toISOString(); };
+router.post('/scan-status', async (req, res) => {
+  try {
+    if (Date.now() < scanStatusUnsupportedUntil) return res.json({ supported: false, reason: 'This tenant doesn’t expose scan status through the API (checked recently).' });
+    const { headers, mgmtBase: base } = await getClient(req.body);
+    const root = base.replace(/\/mgmtconfig\/v1\/admin\/customers\/\d+\/?$/, '');
+    const paths = scanStatusPath ? [scanStatusPath] : SCAN_STATUS_CANDIDATES(req.body.customerId);
+    for (const p of paths) {
+      try {
+        const r = await axios.get(`${root}${p}`, { headers, params: { page: 1, pagesize: 200 }, timeout: 15000 });
+        if (r.status === 200 && r.data && typeof r.data === 'object') { scanStatusPath = p; return res.json({ supported: true, path: p, scans: normaliseScanRows(r.data) }); }
+      } catch (e) { if (e.response?.status === 401 || e.response?.status === 403) throw e; /* try next */ }
+    }
+    scanStatusUnsupportedUntil = Date.now() + 10 * 60 * 1000;
+    res.json({ supported: false, reason: 'ZPA returned no scan-status endpoint for this tenant (the App Shield UI’s API isn’t public).' });
+  } catch (err) { res.status(400).json({ error: zpaError(err) }); }
 });
 
 // GET /api/zpa/scim-groups — SCIM groups from each user IdP, for scoping the access rule

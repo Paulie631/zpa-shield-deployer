@@ -86,7 +86,7 @@ export default function App() {
       case 7: return <DeployScanner data={data} update={update} next={next} back={back} isCloudShare={isCloudShare} />
       case 8: return <ScanConfig data={data} update={update} next={next} back={back} />
       case 9: return <PortalSteps data={data} update={update} next={next} back={back} />
-      case 10: return <Done data={data} goTo={goTo} />
+      case 10: return <Done data={data} goTo={goTo} update={update} />
       default: return null
     }
   }

@@ -5,6 +5,26 @@ const { EC2Client, DescribeVpcsCommand, DescribeSubnetsCommand, DescribeKeyPairs
 const { DeleteParameterCommand } = require('@aws-sdk/client-ssm');
 const { SSMClient, PutParameterCommand } = require('@aws-sdk/client-ssm');
 const { fromNodeProviderChain } = require('@aws-sdk/credential-providers');
+const { isManaged, runShell } = require('../lib/ssm');
+const timings = require('../lib/timings');
+const { notify } = require('../lib/notify');
+
+// Session Manager access for an instance: role + profile, no SSH or inbound ports needed
+function ssmRoleResources(prefix) {
+  return {
+    [`${prefix}Role`]: { Type: 'AWS::IAM::Role', Properties: {
+      AssumeRolePolicyDocument: { Version: '2012-10-17', Statement: [{ Effect: 'Allow', Principal: { Service: 'ec2.amazonaws.com' }, Action: 'sts:AssumeRole' }] },
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'],
+    } },
+    [`${prefix}InstanceProfile`]: { Type: 'AWS::IAM::InstanceProfile', Properties: { Roles: [{ Ref: `${prefix}Role` }] } },
+  };
+}
+// Prepend to user data: install the SSM agent on RHEL 9 (not in the image)
+const SSM_AGENT_PRELUDE = [
+  '# Session Manager agent so EC2 -> Connect works without SSH',
+  '(dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm >/dev/null 2>&1 && systemctl enable --now amazon-ssm-agent) || echo "(SSM agent install skipped)"',
+].join('\n');
+const withSsmAgent = (script) => script.replace(/^(#!\/bin\/bash\n(?:set [^\n]*\n)?(?:trap [^\n]*\n)?)/, `$1${SSM_AGENT_PRELUDE}\n`);
 const { STSClient, GetCallerIdentityCommand } = require('@aws-sdk/client-sts');
 const fs = require('fs');
 const os = require('os');
@@ -247,7 +267,7 @@ router.post('/deploy-test-apps', async (req, res) => {
 
     // Same script as CloudShare: Docker CE (RHEL 9's own "docker" package is podman,
     // which has no docker service) + DVWA + Juice Shop
-    const userDataScript = Buffer.from(generateTestAppsScript()).toString('base64');
+    const userDataScript = Buffer.from(withSsmAgent(generateTestAppsScript())).toString('base64');
     const cidr = await vpcCidr(ec2, vpcId);
 
     const template = JSON.stringify({
@@ -263,12 +283,14 @@ router.post('/deploy-test-apps', async (req, res) => {
             SecurityGroupEgress: [{ IpProtocol: '-1', CidrIp: '0.0.0.0/0' }]
           }
         },
+        ...ssmRoleResources('TestApps'),
         TestAppsInstance: {
           Type: 'AWS::EC2::Instance',
           Properties: {
             ImageId: imageId,
             InstanceType: instanceType || TEST_APPS_INSTANCE_TYPE,
             ...(keyPairName ? { KeyName: keyPairName } : {}),
+            IamInstanceProfile: { Ref: 'TestAppsInstanceProfile' },
             SubnetId: subnetId,
             SecurityGroupIds: [{ Ref: 'TestAppsSecurityGroup' }],
             BlockDeviceMappings: [{ DeviceName: '/dev/sda1', Ebs: { VolumeSize: 40, VolumeType: 'gp3' } }],
@@ -284,14 +306,32 @@ router.post('/deploy-test-apps', async (req, res) => {
     });
 
     const finalStackName = stackName || 'zpa-test-apps';
-    await createStackOrReuse(cfn, {
+    const reused = await createStackOrReuse(cfn, {
       StackName: finalStackName,
       TemplateBody: template,
       Capabilities: ['CAPABILITY_IAM']
     });
 
+    // User data only runs on first boot. On an existing stack, re-run the apps script over SSM
+    // so new endpoints actually start; if the instance has no SSM role, say so plainly.
+    let rerun = null;
+    if (reused) {
+      try {
+        const { ssm } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
+        const st = await stackOutputs(cfn, finalStackName);
+        const m = st.instanceId ? await isManaged(ssm, st.instanceId) : { managed: false, pingStatus: 'NoInstance' };
+        if (m.managed) {
+          const b64 = Buffer.from(generateTestAppsScript()).toString('base64');
+          await runShell(ssm, st.instanceId, [`echo ${b64} | base64 -d > /opt/zpa-shield-testapps.sh`, 'chmod +x /opt/zpa-shield-testapps.sh', 'nohup bash /opt/zpa-shield-testapps.sh > /var/log/zpa-shield-testapps.log 2>&1 &', 'echo started'], { timeoutMs: 30000, comment: 'zpa-shield rerun apps' });
+          rerun = { started: true, message: 'Existing stack kept; the apps script is re-running on the instance through Systems Manager so any new endpoints start. Allow 5–8 minutes.' };
+        } else {
+          rerun = { started: false, needsRecreate: true, message: `Existing stack kept, but its instance isn’t reachable through Systems Manager (${m.pingStatus}) — it was created before the wizard added an SSM role — so the apps script can’t be re-run and new endpoints will NOT start. To get them: delete the ${finalStackName} stack (CloudFormation, or Done → Tear Down) and click Deploy again; the new instance starts everything on first boot. Then re-run Publish because the IP changes.` };
+        }
+      } catch (e) { rerun = { started: false, message: `Existing stack kept; couldn’t re-run the apps script: ${e.message}` }; }
+    }
+
     res.json({
-      stackName: finalStackName,
+      stackName: finalStackName, reused, rerun,
       consoleUrl: `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks`,
       apps: TEST_APPS.map(a => ({ name: a.name.replace('ZPA Shield - ', ''), port: a.port, scheme: a.scheme }))
     });
@@ -324,15 +364,17 @@ router.post('/deploy-traffic-connector', async (req, res) => {
             ],
           },
         },
+        ...ssmRoleResources('TrafficConnector'),
         TrafficConnectorInstance: {
           Type: 'AWS::EC2::Instance',
           Properties: {
             ImageId: imageId,
             InstanceType: 't3.medium',
             ...(keyPairName ? { KeyName: keyPairName } : {}),
+            IamInstanceProfile: { Ref: 'TrafficConnectorInstanceProfile' },
             SubnetId: subnetId,
             SecurityGroupIds: [{ Ref: 'TrafficConnectorSecurityGroup' }],
-            UserData: Buffer.from(generateConnectorScript({ provisioningKey })).toString('base64'),
+            UserData: Buffer.from(withSsmAgent(generateConnectorScript({ provisioningKey }))).toString('base64'),
             Tags: [{ Key: 'Name', Value: 'zpa-traffic-connector' }],
           },
         },
@@ -343,11 +385,95 @@ router.post('/deploy-traffic-connector', async (req, res) => {
       },
     });
     const finalStackName = stackName || 'zpa-traffic-connector';
-    const reused = await createStackOrReuse(cfn, { StackName: finalStackName, TemplateBody: template });
+    const reused = await createStackOrReuse(cfn, { StackName: finalStackName, TemplateBody: template, Capabilities: ['CAPABILITY_IAM'] });
     res.json({ stackName: finalStackName, reused });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ─── Status & readiness probes (Systems Manager) ─────────────────────────────────
+async function stackOutputs(cfn, stackName) {
+  const r = await cfn.send(new DescribeStacksCommand({ StackName: stackName }));
+  const s = r.Stacks[0];
+  const out = Object.fromEntries((s.Outputs || []).map(o => [o.OutputKey, o.OutputValue]));
+  return { status: s.StackStatus, created: s.CreationTime, instanceId: out.InstanceId, privateIp: out.PrivateIp };
+}
+const since = (t) => Math.round((Date.now() - new Date(t).getTime()) / 1000);
+
+// GET /api/aws/instance-managed?stackName= — can we run commands on that stack's instance?
+router.get('/instance-managed', async (req, res) => {
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region, stackName } = req.query;
+  try {
+    const { cfn, ssm } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
+    const st = await stackOutputs(cfn, stackName);
+    const m = st.instanceId ? await isManaged(ssm, st.instanceId) : { managed: false, pingStatus: 'NoInstance' };
+    res.json({ ...st, ...m, ageSeconds: st.created ? since(st.created) : null });
+  } catch (err) { res.status(400).json({ error: credentialError(err) }); }
+});
+
+// POST /api/aws/probe-test-apps — from the App Scanner instance (it has SSM and is the thing
+// that must reach the apps), curl every test endpoint and report docker/memory on the apps VM
+// when that VM is itself managed.
+router.post('/probe-test-apps', async (req, res) => {
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region, ip, scannerStack = 'zpa-app-scanner', testAppsStack = 'zpa-test-apps', launchedAt } = req.body;
+  try {
+    if (!ip) throw new Error('No test-apps IP yet');
+    const { cfn, ssm } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
+    const apps = await stackOutputs(cfn, testAppsStack).catch(() => ({}));
+    const ageSeconds = apps.created ? since(apps.created) : (launchedAt ? since(launchedAt) : null);
+
+    // Which managed instance will do the probing? Prefer the scanner (the path that matters).
+    let prober = null, proberName = '';
+    for (const [name, stack] of [['App Scanner', scannerStack], ['test apps VM', testAppsStack]]) {
+      try { const o = await stackOutputs(cfn, stack); if (o.instanceId && (await isManaged(ssm, o.instanceId)).managed) { prober = o.instanceId; proberName = name; break; } } catch { /* next */ }
+    }
+    const est = timings.get('testapps.all'), estCore = timings.get('testapps.core');
+    if (!prober) {
+      return res.json({ ok: false, reason: 'no-prober', ageSeconds, estimate: est,
+        message: 'Neither the App Scanner nor the test-apps VM is reachable through Systems Manager yet, so the wizard can’t probe the endpoints from inside the VPC. A freshly launched instance registers ~2 minutes after boot; instances from wizard versions before 1.8 have no SSM role (recreate the stack to get one). You can still check from a Client Connector device.',
+        endpoints: TEST_APPS.map(a => ({ ...a, url: `${a.scheme}://${ip}${(a.scheme==='http'&&a.port===80)||(a.scheme==='https'&&a.port===443)?'':':'+a.port}/`, code: null, ok: null })) });
+    }
+    const curls = TEST_APPS.map(a => `echo "EP ${a.key} $(curl -sk -o /dev/null -m 6 -w '%{http_code}' ${a.scheme}://${ip}:${a.port}/ || echo 000)"`);
+    const local = prober && proberName === 'test apps VM' ? ['echo "DOCKER $(docker ps -a --format \'{{.Names}}={{.Status}}\' 2>/dev/null | tr \'\\n\' \';\')"', 'echo "MEM $(free -m | awk \'/Mem:/{print $3\"/\"$2}\')"'] : [];
+    const out = await runShell(ssm, prober, [...curls, ...local], { timeoutMs: 90000, comment: 'zpa-shield probe' });
+    const codes = Object.fromEntries([...out.stdout.matchAll(/^EP (\S+) (\d{3})$/gm)].map(m => [m[1], m[2]]));
+    const endpoints = TEST_APPS.map(a => {
+      const code = codes[a.key] || '000';
+      const ok = /^[1-5]\d\d$/.test(code) && code !== '000';
+      const url = `${a.scheme}://${ip}${(a.scheme==='http'&&a.port===80)||(a.scheme==='https'&&a.port===443)?'':':'+a.port}/`;
+      return { ...a, url, code, ok };
+    });
+    const docker = (out.stdout.match(/^DOCKER (.*)$/m) || [])[1] || '';
+    const mem = (out.stdout.match(/^MEM (.*)$/m) || [])[1] || '';
+    const core = endpoints.filter(e => e.key === 'dvwa' || e.key === 'juice');
+    const allUp = endpoints.every(e => e.ok), coreUp = core.every(e => e.ok);
+    if (allUp && ageSeconds) timings.record('testapps.all', ageSeconds);
+    else if (coreUp && ageSeconds) timings.record('testapps.core', ageSeconds);
+    if (allUp && req.body.notify) notify('ZPA Shield Deployer', `All ${endpoints.length} test endpoints are answering at ${ip}`);
+    res.json({ ok: true, probedFrom: proberName, endpoints, docker, mem, ageSeconds, allUp, coreUp, estimate: est, estimateCore: estCore,
+      slow: ageSeconds && !allUp && ageSeconds > est.max });
+  } catch (err) { res.status(400).json({ error: err.code === 'NOT_MANAGED' ? err.message : credentialError(err) }); }
+});
+
+// POST /api/aws/rerun-test-apps — the apps script only runs on first boot (user data), so a
+// redeploy on an existing stack changes nothing. Re-run it through Systems Manager instead.
+router.post('/rerun-test-apps', async (req, res) => {
+  const { accessKeyId, secretAccessKey, sessionToken, awsProfile, region, stackName = 'zpa-test-apps' } = req.body;
+  try {
+    const { cfn, ssm } = awsClients(accessKeyId, secretAccessKey, region, sessionToken, awsProfile);
+    const st = await stackOutputs(cfn, stackName);
+    if (!st.instanceId) throw new Error(`Stack ${stackName} has no instance`);
+    const m = await isManaged(ssm, st.instanceId);
+    if (!m.managed) return res.status(409).json({ error: `The test-apps instance isn’t reachable through Systems Manager (${m.pingStatus}), so the wizard can’t re-run the apps script on it. This instance was created without an SSM role (wizard < 1.8). To get the new apps: delete the ${stackName} stack (Done → Tear Down, or CloudFormation) and click Deploy again — the new stack has Session Manager and starts all endpoints on first boot. Then re-run Publish (the IP changes).`, needsRecreate: true });
+    const script = generateTestAppsScript();
+    const b64 = Buffer.from(script).toString('base64');
+    const out = await runShell(ssm, st.instanceId, [
+      `echo ${b64} | base64 -d > /opt/zpa-shield-testapps.sh`, 'chmod +x /opt/zpa-shield-testapps.sh',
+      'nohup bash /opt/zpa-shield-testapps.sh > /var/log/zpa-shield-testapps.log 2>&1 &', 'echo started',
+    ], { timeoutMs: 30000, comment: 'zpa-shield rerun apps' });
+    res.json({ started: /started/.test(out.stdout), instanceId: st.instanceId, privateIp: st.privateIp, log: '/var/log/zpa-shield-testapps.log' });
+  } catch (err) { res.status(400).json({ error: err.code === 'NOT_MANAGED' ? err.message : credentialError(err) }); }
 });
 
 // POST /api/aws/teardown — delete the stacks this wizard created (and the SSM key parameter).

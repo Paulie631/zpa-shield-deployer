@@ -1,8 +1,10 @@
 import React from 'react'
 import { zpaPortalBase } from '../lib/zpa'
 import TearDown from '../components/TearDown'
+import ConnectorStatus from '../components/ConnectorStatus'
+import ScanProgress from '../components/ScanProgress'
 
-export default function Done({ data, goTo }) {
+export default function Done({ data, goTo, update }) {
   const isAWS = data.target === 'aws'
   const tenantBase = zpaPortalBase(data)
   const EC = 'https://console.zscaler.com/private'
@@ -58,6 +60,11 @@ export default function Done({ data, goTo }) {
       </div>
 
       <hr className="divider" />
+
+      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 10 }}>📡 Live status</h3>
+      <ConnectorStatus data={data} groupNames={['ZPA Shield Traffic Connectors', data.connectorGroupName || 'ZPA-AppScanner-Group']} startedAt={data.scannerStackCompletedAt || data.trafficStackCompletedAt} title="Connectors" />
+      <div style={{ height: 10 }} />
+      <ScanProgress data={data} update={update} />
 
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>🔗 Quick Links — Experience Center</h3>
       <div className="portal-links">

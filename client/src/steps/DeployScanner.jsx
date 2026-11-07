@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
+import ConnectorStatus from '../components/ConnectorStatus'
 import CodePreview from '../components/CodePreview'
 import { awsAuth } from '../lib/aws'
 
@@ -135,7 +136,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
         setDeploying(false)
         if (r.data.status === 'CREATE_COMPLETE') {
           const privateIp = r.data.outputs?.find(o => o.OutputKey === 'PrivateIp')?.OutputValue
-          update({ scannerPrivateIp: privateIp })
+          update({ scannerPrivateIp: privateIp, scannerStackCompletedAt: data.scannerStackCompletedAt || new Date().toISOString() })
         }
       }
       return r.data.status
@@ -252,7 +253,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
             </div>
           )}
           {stackStatus === 'CREATE_COMPLETE' && (
-            <div className="hint" style={{ marginTop: 10 }}>⏳ The VM is still installing the connector and Docker, then reboots (about 5 to 10 minutes). It then appears in ZPA under App Connectors.</div>
+            <ConnectorStatus data={data} groupNames={[data.connectorGroupName || 'ZPA-AppScanner-Group']} startedAt={data.scannerStackCompletedAt} title="App Scanner connector in ZPA" />
           )}
           {stackStatus === 'CREATE_COMPLETE' && (
             <a className="portal-link" style={{ marginTop: 12, display: 'inline-flex' }}

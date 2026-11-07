@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
+import StaleSegments from '../components/StaleSegments'
+import ScanProgress from '../components/ScanProgress'
 import { zpaAuth, zpaPortalBase } from '../lib/zpa'
 import { awsAuth } from '../lib/aws'
 
@@ -66,7 +68,7 @@ export default function ScanConfig({ data, update, next, back }) {
     if (!data.connectorGroupId) { setPrep({ state: 'error', checks: [], error: 'No App Scanner connector group yet — finish the Scanner Key step first.' }); return }
     setPrep({ state: 'running', checks: [] })
     try {
-      const r = await axios.post('/api/zpa/prepare-scanner', { ...zpaAuth(data), scannerGroupId: data.connectorGroupId })
+      const r = await axios.post('/api/zpa/prepare-scanner', { ...zpaAuth(data), scannerGroupId: data.connectorGroupId, shieldScanningConfirmed: !!data.shieldScanningConfirmed })
       setPrep({ state: 'done', ...r.data }); update({ scannerReady: !!r.data.ready })
       if (r.data.scannerNames?.length) update({ scannerConnectorNames: r.data.scannerNames })
     } catch (e) { setPrep({ state: 'error', checks: [], error: e.response?.data?.error || e.message }) }
@@ -135,8 +137,10 @@ export default function ScanConfig({ data, update, next, back }) {
         {prep.state === 'error' && <div className="alert alert-error" style={{ marginTop: 8 }}><span>⚠️ {prep.error}</span></div>}
         {prep.checks.map(c => (
           <div key={c.id} style={{ display: 'flex', gap: 8, fontSize: 13, padding: '3px 0' }}>
-            <span>{c.ok ? '✅' : '❌'}</span>
-            <div><strong>{c.label}</strong>{c.detail ? <div style={{ color: '#64748b' }}>{c.detail}</div> : null}</div>
+            <span>{c.ok ? '✅' : c.needsConfirm ? '🟡' : '❌'}</span>
+            <div><strong>{c.label}</strong>{c.detail ? <div style={{ color: '#64748b' }}>{c.detail}</div> : null}
+              {c.needsConfirm && <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginTop: 4, fontSize: 13 }}><input type="checkbox" onChange={e => { update({ shieldScanningConfirmed: e.target.checked }); setTimeout(prepareScanner, 50) }} /> I’ve confirmed it shows Enabled in the portal</label>}
+            </div>
           </div>
         ))}
         {prep.state === 'done' && !prep.ready && <div className="hint" style={{ marginTop: 6 }}>Create the scan once these are green — a scan created earlier can land on a connector that never runs it, and ZPA then blocks new requests for those segments for 12 hours.</div>}
@@ -205,6 +209,9 @@ export default function ScanConfig({ data, update, next, back }) {
           <div className="hint">Schedule during off-peak hours</div>
         </div>
       </div>
+
+      <StaleSegments data={data} ip={testIp} onChanged={loadSegments} />
+      <ScanProgress data={data} update={update} />
 
       {(() => {
         const picked = segments.filter(x => selectedSegments.includes(x.id))
