@@ -5,7 +5,7 @@ const fs=require('fs');const OUT=process.argv[2]||require('path').join(__dirname
 async function start(b){const p=await b.newPage({viewport:{width:1100,height:1400}});const errs=[];p.on('pageerror',e=>errs.push(e.message));
  await p.goto('http://localhost:3000');await p.evaluate(()=>localStorage.clear());await p.reload();
  await p.getByText('OneAPI',{exact:false}).first().click();
- await p.getByPlaceholder('yourcompany').fill('paulaiuto');await p.getByPlaceholder('Zidentity Client ID').fill('c');await p.locator('.input-with-reveal input').first().fill('s');await p.getByPlaceholder('e.g. 216196257331281920').fill('72064686102675456');
+ await p.getByPlaceholder('yourcompany').fill('paulaiuto');await p.getByPlaceholder('Zidentity Client ID').fill('c');await p.locator('.input-with-reveal input').first().fill('s');{const cidf=p.getByPlaceholder('e.g. 216196257331281920');const pre=await cidf.inputValue();if(pre==='72064686102675456')console.log('customer id remembered');else await cidf.fill('72064686102675456');}
  await p.locator('button.btn-primary').last().click();return {p,errs};}
 let LAST;const h2=async p=>{LAST=p;try{return await p.locator('h2').first().innerText({timeout:15000})}catch(e){await p.screenshot({path:OUT+'/fail.png',fullPage:true}).catch(()=>{});console.log('PAGE TEXT:',(await p.locator('body').innerText().catch(()=>'')).slice(0,800));throw e}};
 async function zpaSetup(p){
@@ -80,5 +80,8 @@ async function scanToDone(p,tag){
   console.log('AWS step:',await h2(p));
   await p.waitForTimeout(2000);if(await p.getByRole('button',{name:/Launch Stack/}).count())await p.getByRole('button',{name:/Launch Stack/}).click();else console.log('AWS: existing scanner stack picked up');await p.getByRole('button',{name:'Continue →'}).waitFor({timeout:30000});
   await p.getByRole('button',{name:'Continue →'}).click();
-  await scanToDone(p,'AWS');console.log('AWS errors:',errs.length?errs:'none');if(errs.length)throw new Error('page errors on AWS path: '+errs.join(' | '));await p.close();}
+  await scanToDone(p,'AWS');
+  // remembered customer ID: a fresh session (keep localStorage, drop progress) prefills it on the login step
+  await p.evaluate(()=>sessionStorage.clear());await p.goto('http://localhost:3000');await p.waitForTimeout(800);const remembered=await p.getByPlaceholder('e.g. 216196257331281920').inputValue();console.log('remembered customer id:',remembered);if(remembered!=='72064686102675456')throw new Error('customer ID not remembered on the login step');
+  console.log('AWS errors:',errs.length?errs:'none');if(errs.length)throw new Error('page errors on AWS path: '+errs.join(' | '));await p.close();}
  await b.close();console.log('E2E PASSED')})().catch(e=>{console.error('FAIL',e.message.split('\n').slice(0,4).join(' | '));process.exit(1)});

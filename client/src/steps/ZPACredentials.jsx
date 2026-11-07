@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { savedCustomerId, rememberCustomerId } from '../lib/zpa'
 
@@ -64,10 +64,13 @@ export default function ZPACredentials({ data, update, next }) {
   const [tenantUrl, setTenantUrl] = useState(data.tenantUrl || saved.tenantUrl || '')
   const [apiKey, setApiKey] = useState(data.apiKey || saved.apiKey || '')
   const [clientId, setClientId] = useState(data.clientId || saved.clientId || '')
-  const [customerId, setCustomerId] = useState(data.customerId || savedCustomerId(data) || '')
+  // Remembered per tenant: look it up with the saved vanity domain (data.vanityDomain is empty on a fresh load)
+  const [customerId, setCustomerId] = useState(data.customerId || savedCustomerId({ ...data, vanityDomain: data.vanityDomain || saved.vanityDomain, tenantUrl: data.tenantUrl || saved.tenantUrl }) || saved.customerId || '')
   const [clientSecret, setClientSecret] = useState(data.clientSecret || saved.clientSecret || '')
   const [cloudEnv, setCloudEnv] = useState(data.cloudEnv || saved.cloudEnv || 'zscaler.com')
   const [vanityDomain, setVanityDomain] = useState(data.vanityDomain || saved.vanityDomain || '')
+  // If the user switches tenant, pick up that tenant's remembered ID
+  useEffect(() => { if (!customerId && vanityDomain) { const c = savedCustomerId({ vanityDomain }); if (c) setCustomerId(c) } }, [vanityDomain])
   const [showApiKey, setShowApiKey] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -84,7 +87,7 @@ export default function ZPACredentials({ data, update, next }) {
   }, [])
   const secretSaved = (name) => !!vault?.secrets?.includes(name)
   React.useEffect(() => {
-    saveCreds({ authMode, tenantUrl, clientId, cloudEnv, vanityDomain })
+    saveCreds({ authMode, tenantUrl, clientId, cloudEnv, vanityDomain, customerId: isOneApi ? customerId : undefined })
   }, [authMode, tenantUrl, clientId, cloudEnv, vanityDomain])
 
   const clearSaved = async () => {
