@@ -5,16 +5,17 @@ const fs=require('fs');const OUT=process.argv[2]||require('path').join(__dirname
 async function start(b){const p=await b.newPage({viewport:{width:1100,height:1400}});const errs=[];p.on('pageerror',e=>errs.push(e.message));
  await p.goto('http://localhost:3000');await p.evaluate(()=>localStorage.clear());await p.reload();
  await p.getByText('OneAPI',{exact:false}).first().click();
- await p.getByPlaceholder('yourcompany').fill('paulaiuto');await p.getByPlaceholder('Zidentity Client ID').fill('c');await p.locator('.input-with-reveal input').first().fill('s');
+ await p.getByPlaceholder('yourcompany').fill('paulaiuto');await p.getByPlaceholder('Zidentity Client ID').fill('c');await p.locator('.input-with-reveal input').first().fill('s');await p.getByPlaceholder('e.g. 216196257331281920').fill('72064686102675456');
  await p.locator('button.btn-primary').last().click();return {p,errs};}
 let LAST;const h2=async p=>{LAST=p;try{return await p.locator('h2').first().innerText({timeout:15000})}catch(e){await p.screenshot({path:OUT+'/fail.png',fullPage:true}).catch(()=>{});console.log('PAGE TEXT:',(await p.locator('body').innerText().catch(()=>'')).slice(0,800));throw e}};
 async function zpaSetup(p){
- await p.locator('input[placeholder="e.g. 216196257331281920"]').fill('72064686102675456');await p.locator('h2').first().click();await p.waitForTimeout(1500);
+ {const cb=p.locator('input[placeholder="e.g. 216196257331281920"]');if(await cb.count())await cb.fill('72064686102675456');}await p.locator('h2').first().click();await p.waitForTimeout(1500);
  await p.getByText('Create new connector group').click();await p.getByRole('button',{name:/Create Group/}).click();await p.waitForTimeout(1500);
  await p.getByText('Create new provisioning key via API').click();await p.getByRole('button',{name:/Create Key/}).click();await p.waitForTimeout(1500);
  await p.getByRole('button',{name:'Continue →'}).click();}
 async function publish(p,tag){console.log(tag,'step:',await h2(p));const cidBox=p.locator('input[placeholder="e.g. 216196257331281920"]');if(await cidBox.count())await cidBox.fill('72064686102675456');await p.getByRole('button',{name:/Publish Test Apps/}).click();await p.getByText('Published.',{exact:false}).waitFor({timeout:30000}).catch(async err=>{await p.screenshot({path:OUT+'/'+tag+'-publish-stuck.png',fullPage:true});console.log('STUCK:',(await p.locator('.card').first().innerText()).slice(0,1500));throw err;});console.log(tag,'publish:',(await p.locator('.card').first().innerText()).split(String.fromCharCode(10)).filter(l=>l.startsWith('•')).join(' | '));await p.screenshot({path:OUT+'/'+tag+'-publish.png',fullPage:true});await p.getByRole('button',{name:/Continue to Verify Access/}).click();}
-async function verify(p,tag){console.log(tag,'step:',await h2(p));await p.getByText('Traffic App Connector online').waitFor({timeout:15000});
+async function verify(p,tag){console.log(tag,'step:',await h2(p));await p.getByText('Traffic App Connector online').waitFor({timeout:15000});await p.waitForTimeout(800);
+ const lines=(await p.locator('.card').first().innerText()).split(String.fromCharCode(10));const red=lines.map((l,i)=>/^❌\s*$/.test(l.trim())?((lines[i+1]||'')+' :: '+(lines[i+2]||'')).trim():null).filter(Boolean);if(red.length)throw new Error('Verify has red checks: '+red.join(' | '));
  if(await p.getByText('Present but disabled').count())throw new Error('rule with disabled:"0" shown as disabled');
  await p.getByPlaceholder('user@example.com').fill('ztest@example.com');await p.getByRole('button',{name:'Check user'}).click();await p.getByText('Private Access service entitlement').waitFor({timeout:15000});
  if(await p.getByRole('button',{name:/Enable Private Access via API/}).count()){await p.getByRole('button',{name:/Enable Private Access via API/}).click();await p.getByText('Private Access is now on for this user',{exact:false}).waitFor({timeout:15000});}
@@ -33,9 +34,9 @@ async function scanToDone(p,tag){
  await p.getByText('DVWA',{exact:true}).waitFor({timeout:15000});await p.getByText('DVWA',{exact:true}).click();
  await p.getByText('Application Shield Scanning on for ZPA-AppScanner-Key-1').waitFor({timeout:20000}).catch(async e=>{console.log('CARD:',(await p.locator('.card').first().innerText()).slice(0,1500));throw e;});await p.getByText('Added the App Scanner connector group').or(p.getByText('Already linked')).first().waitFor({timeout:5000});
  console.log(tag,'scanner readiness:',(await p.locator('.card').first().innerText()).split(String.fromCharCode(10)).filter(l=>/Scanner linked|connector online|Shield Scanning|Added the|Already|Turned on/.test(l)).join(' | '));
- await p.getByRole('button',{name:/Create Scan/}).click();await p.getByText('doesn’t document an API').waitFor({timeout:15000});await p.getByText('Autonomous App Shield → Scans → Add').waitFor({timeout:5000});
+ await p.getByText('Autonomous App Shield → Scans → Add').waitFor({timeout:5000});await p.getByRole('button',{name:/Try creating it via API/}).click();await p.getByText('no API for creating App Shield scans',{exact:false}).waitFor({timeout:15000});
  await p.screenshot({path:OUT+'/'+tag+'-scan.png',fullPage:true});
- await p.getByRole('button',{name:/create it in the portal/}).click();
+ await p.getByRole('button',{name:/created it in the portal/}).click();
  console.log(tag,'step:',await h2(p));
  const link=await p.getByText('Open App Connector Groups').getAttribute('href');console.log(tag,'portal link:',link);
  await p.getByRole('button',{name:/Continue Anyway|Finish/}).click();

@@ -155,7 +155,7 @@ export default function DeployTestApps({ data, update, next, back }) {
             <div className="app-icon">{app.icon}</div>
             <h4>{app.name}</h4>
             <p>{app.desc}</p>
-            <div className="port">Port {app.port} · {app.domain}</div>
+            <div className="port">Port {app.port}{privateIp ? ` · http://${privateIp}${app.port === 80 ? '' : ':' + app.port}` : ''}</div>
             {appsUp && (
               <div style={{ marginTop: 8, fontSize: 12, color: '#065f46', fontWeight: 600 }}>✅ Deployed</div>
             )}
@@ -165,7 +165,7 @@ export default function DeployTestApps({ data, update, next, back }) {
 
       {isAWS && (
         <div className="alert alert-info" style={{ marginTop: 4 }}>
-          ℹ️ Deploys a <strong>t3.medium</strong> EC2 instance running RHEL 9 with Docker. DVWA and Juice Shop start automatically. The instance uses no inbound security group rules — ZPA handles access.
+          ℹ️ Deploys a <strong>t3.medium</strong> EC2 instance running RHEL 9 with Docker. DVWA and Juice Shop start automatically. Inbound is limited to ports 80/3000 from inside the VPC (for the traffic connector and the scanner) — users reach it only through ZPA.
         </div>
       )}
 
@@ -227,13 +227,13 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
               {stackStatus}
             </span>
           </div>
-          {privateIp && <div style={{ fontSize: 13 }}><strong>Private IP:</strong> {privateIp} — add this to your ZPA app segments</div>}
+          {privateIp && <div style={{ fontSize: 13 }}><strong>Private IP:</strong> {privateIp} — the Publish step creates the ZPA app segments for it</div>}
         </div>
       )}
 
       {privateIp && (
         <div className="alert alert-success" style={{ marginTop: 12 }}>
-          <span>✅ <strong>Test apps at {privateIp}.</strong> The Configure Scan step can create their ZPA app segments for you (DVWA on port 80, Juice Shop on port 3000).</span>
+          <span>✅ <strong>Test apps at {privateIp}.</strong> Next, Publish puts them behind ZPA (DVWA on port 80, Juice Shop on port 3000).</span>
         </div>
       )}
 

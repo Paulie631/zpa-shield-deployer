@@ -17,13 +17,14 @@ axios.post=async(u,b)=>{ if(u.includes('/ziam/')){ if(/\/groups$/.test(u)){const
   if(u.includes('/provisioningKey')) return ok({id:'pk1',name:b.name,provisioningKey:'3|api.private.zscaler.com|FAKEKEY=='});
   const k=zkey(u);const o={id:'z'+(++n),disabled:'0',...b};if(k){(zdb[k]=zdb[k]||[]).push(o);if(/policySet\/[^/]+\/rule$/.test(k))(zdb['policySet/rules/policyType/ACCESS_POLICY']=zdb['policySet/rules/policyType/ACCESS_POLICY']||[]).push(o);}
   return ok(o);};
-axios.put=async(u,b)=>{ if(/\/connector\/C1$/.test(u)){Object.assign(shieldConn,b);return ok({});} if(/\/serverGroup\/[^/]+$/.test(u)&&b.appConnectorGroups?.length){const last=b.appConnectorGroups[b.appConnectorGroups.length-1].id;if(!/traffic/i.test(JSON.stringify(b.appConnectorGroups.slice(-1))))shieldConn.appConnectorGroupId=last;} if(u.endsWith('/api/v3/envs')){const nm=b.itemsCart[0].name;vms.push({id: b.itemsCart[0].type===4?'V4':(nm.includes('Scanner')?'V3':'V2'),name:nm,os:'Linux',cpuCount:2,memorySizeMb:4096,diskSizeGb:40,statusText:'Running',internalAddresses:[nm.includes('Scanner')?'10.0.0.7':'10.0.0.9']});return ok({environmentId:b.envId});}
+axios.put=async(u,b)=>{ {const m=u.match(/\/application\/(z\d+)$/);if(m){const o=(zdb['application']||[]).find(x=>x.id===m[1]);if(o)Object.assign(o,b);return ok({});}} if(/\/connector\/C1$/.test(u)){Object.assign(shieldConn,b);return ok({});} if(/\/connector\/C2$/.test(u)){Object.assign(trafficConn,b);return ok({});} if(/\/serverGroup\/[^/]+$/.test(u)&&b.appConnectorGroups?.length){const last=b.appConnectorGroups[b.appConnectorGroups.length-1].id;if(!/traffic/i.test(JSON.stringify(b.appConnectorGroups.slice(-1))))shieldConn.appConnectorGroupId=last;} if(u.endsWith('/api/v3/envs')){const nm=b.itemsCart[0].name;vms.push({id: b.itemsCart[0].type===4?'V4':(nm.includes('Scanner')?'V3':'V2'),name:nm,os:'Linux',cpuCount:2,memorySizeMb:4096,diskSizeGb:40,statusText:'Running',internalAddresses:[nm.includes('Scanner')?'10.0.0.7':'10.0.0.9']});return ok({environmentId:b.envId});}
   if(u.includes('editvmhardware')){const v=vms.find(x=>x.id===b.vmId);v.cpuCount=b.numCpus;v.memorySizeMb=b.memorySizeMBs;v.diskSizeGb=b.diskSizeGBs;return ok({conflictsFound:false});} return ok({});};
 // Zidentity: one hosted user, no groups, ZIA only until added to the entitlement group (then ZPA appears)
 const zid={groups:[],members:{}};
 // ZPA connectors: one App Scanner connector with App Shield scanning off until the wizard turns it on
 const shieldConn={id:'C1',name:'ZPA-AppScanner-Key-1',appConnectorGroupId:'new1',controlChannelStatus:'ZPN_STATUS_AUTHENTICATED',appShieldScanningEnabled:false};
-axios.get=async(u,c)=>{ if(/\/connector$/.test(u)) return ok({list:[shieldConn],totalPages:'1'}); if(/\/connector\/C1$/.test(u)) return ok({...shieldConn});
+const trafficConn={id:'C2',name:'ZPA Shield Traffic Connector key-1',appConnectorGroupName:'ZPA Shield Traffic Connectors',controlChannelStatus:'ZPN_STATUS_AUTHENTICATED',privateIp:'172.31.5.5',appShieldScanningEnabled:false};
+axios.get=async(u,c)=>{ {const m=u.match(/\/application\/(z\d+)$/);if(m){const o=(zdb['application']||[]).find(x=>x.id===m[1]);return ok(o||{});}} if(/\/connector$/.test(u)){const tg=(zdb['appConnectorGroup']||[]).find(g=>g.name==='ZPA Shield Traffic Connectors');if(tg)trafficConn.appConnectorGroupId=tg.id;return ok({list:[shieldConn,trafficConn],totalPages:'1'});} if(/\/connector\/C2$/.test(u)) return ok({...trafficConn}); if(/\/connector\/C1$/.test(u)) return ok({...shieldConn});
   if(u.includes('/ziam/')){ if(/\/users$/.test(u)) return ok({records:(c.params.loginName||c.params['loginName[like]']||'').startsWith('ztest')?[{id:'U1',loginName:'ztest@example.com',displayName:'Z Test',status:'ACTIVE',source:'HOSTED'}]:[]});
     if(u.endsWith('/service-entitlements')) return ok({records:[{service:{serviceName:'ZIA',cloudName:'zscalerthree.net'}}].concat((zid.members.U1||[]).includes('ZPA Shield Test Users')?[{service:{serviceName:'ZPA',cloudName:'private.zscaler.com'}}]:[])});
     if(/\/users\/U1\/groups$/.test(u)) return ok({records:(zid.members.U1||[]).map(n=>({name:n}))});
@@ -38,8 +39,8 @@ axios.get=async(u,c)=>{ if(/\/connector$/.test(u)) return ok({list:[shieldConn],
   if(/\/v2\/.*\/idp$/.test(u)) return ok({list:[{id:'I1',name:'Zidentity',enabled:true,ssoType:['USER','ADMIN'],domainList:['example.com']}],totalPages:'1'});
   if(u.includes('enrollmentCert')) return ok({list:[{id:'42',name:'Connector'}]});
   if(u.endsWith('policySet/policyType/ACCESS_POLICY')) return ok({id:'PS1'});
-  if(u.endsWith('/appConnectorGroup')) return ok({list:[{id:'new1',name:'ZPA-AppScanner-Group'},{id:'CG2',name:'Traffic Connectors'}]});
-  if(u.endsWith('/application')) return ok({list:[{id:'S1',name:'DVWA',domainNames:['10.0.0.9']},{id:'S2',name:'Juice Shop',domainNames:['10.0.0.9']}]});
+  if(u.endsWith('/appConnectorGroup')) return ok({list:[{id:'new1',name:'ZPA-AppScanner-Group'},{id:'CG2',name:'Traffic Connectors'},...(zdb['appConnectorGroup']||[])],totalPages:'1'});
+  if(u.endsWith('/application')) return ok({list:[{id:'S1',name:'DVWA',domainNames:['10.0.0.9']},{id:'S2',name:'Juice Shop',domainNames:['10.0.0.9']},...(zdb['application']||[])],totalPages:'1'});
   const k=zkey(u);if(k&&zdb[k])return ok({list:zdb[k],totalPages:'1'});
   return ok({list:[]});};
 global.AWSCALLS=[];const sts=require(root+'/node_modules/@aws-sdk/client-sts');sts.STSClient.prototype.send=async function(){const c=await this.config.credentials();return {Account:'123456789012',Arn:'arn:aws:sts::123456789012:assumed-role/Sandbox/paul'}};

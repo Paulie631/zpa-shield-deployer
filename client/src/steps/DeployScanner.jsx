@@ -212,7 +212,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
   return (
     <div className="card">
       <h2>Deploy App Scanner to AWS</h2>
-      <p className="subtitle">Review the CloudFormation template and launch your App Scanner EC2 instance. We'll store your provisioning key in SSM and poll the stack until it's ready.</p>
+      <p className="subtitle">Launch the App Scanner EC2 instance with CloudFormation (RHEL 9, c5.4xlarge by default). The provisioning key goes to SSM Parameter Store as a SecureString; the wizard polls the stack until it’s ready and then opens the VPC-internal network paths the scan needs.</p>
 
       {error && <div className="alert alert-error">⚠️ {error}</div>}
 
@@ -244,7 +244,7 @@ export default function DeployScanner({ data, update, next, back, isCloudShare }
             </div>
           ))}
           {stackStatus === 'CREATE_COMPLETE' && netFix && (
-            <div className={`alert ${netFix.state === 'error' ? 'alert-error' : netFix.state === 'done' ? 'alert-success' : 'alert-info'}`} style={{ display: 'block', marginTop: 10 }}>
+            <div className={`alert ${netFix.state === 'error' ? 'alert-error' : netFix.state === 'done' && !(netFix.lines || []).every(l => /skipped/i.test(l)) ? 'alert-success' : 'alert-warning'}`} style={{ display: 'block', marginTop: 10 }}>
               {netFix.state === 'running' && <><span className="spinner spinner-blue" /> Opening the network paths the scan needs (scanner to test apps)...</>}
               {netFix.state !== 'running' && <strong>Network paths for scanning:</strong>}
               {netFix.lines.map((l, i) => <div key={i} style={{ fontSize: 13, marginTop: 2 }}>• {l}</div>)}

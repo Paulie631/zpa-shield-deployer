@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import axios from 'axios'
+import { savedCustomerId, rememberCustomerId } from '../lib/zpa'
 
 const CLOUD_ENVS = [
   { value: 'zscaler.com',      label: 'Zscaler (zscaler.com) — most common' },
@@ -33,10 +34,10 @@ const GUIDES = {
     title: 'Where to find your OneAPI credentials',
     steps: [
       'Go to console.zscaler.com and log in as an admin',
-      'Navigate to Private Access → Client Credentials (direct URL: console.zscaler.com/private/client-credentials)',
+      'Open Private Access → Client Credentials (console.zscaler.com/private/client-credentials) — the OneAPI client lives here in Experience Center',
       'Click Add Client, set grant type to Client Credentials, copy the Client ID and Secret',
       'Your Vanity Domain is shown on the client details page — it is the prefix before .zslogin.net (e.g. "acme" from acme.zslogin.net)',
-      'Select the Cloud Environment below that matches your ZPA tenant',
+      'Pick the Cloud Environment (above) that matches your ZPA tenant, and copy the numeric ZPA Customer ID shown on the same page',
     ],
     docsUrl: 'https://automate.zscaler.com/docs/getting-started/getting-started'
   }
@@ -63,6 +64,7 @@ export default function ZPACredentials({ data, update, next }) {
   const [tenantUrl, setTenantUrl] = useState(data.tenantUrl || saved.tenantUrl || '')
   const [apiKey, setApiKey] = useState(data.apiKey || saved.apiKey || '')
   const [clientId, setClientId] = useState(data.clientId || saved.clientId || '')
+  const [customerId, setCustomerId] = useState(data.customerId || savedCustomerId(data) || '')
   const [clientSecret, setClientSecret] = useState(data.clientSecret || saved.clientSecret || '')
   const [cloudEnv, setCloudEnv] = useState(data.cloudEnv || saved.cloudEnv || 'zscaler.com')
   const [vanityDomain, setVanityDomain] = useState(data.vanityDomain || saved.vanityDomain || '')
@@ -93,7 +95,7 @@ export default function ZPACredentials({ data, update, next }) {
   }
 
   const haveSecret = authMode === 'apikey' ? (apiKey || secretSaved('apiKey')) : (clientSecret || secretSaved('clientSecret'))
-  const canSubmit = (isOneApi ? (clientId && haveSecret && vanityDomain) : tenantUrl) &&
+  const canSubmit = (isOneApi ? (clientId && haveSecret && vanityDomain && /^\d+$/.test(customerId)) : tenantUrl) &&
     (authMode === 'apikey' ? haveSecret : clientId && haveSecret)
 
   const validate = async () => {
@@ -105,7 +107,7 @@ export default function ZPACredentials({ data, update, next }) {
       if (!isOneApi) params.tenantUrl = tenantUrl
       if (authMode === 'apikey') params.apiKey = apiKey
       else { params.clientId = clientId; params.clientSecret = clientSecret }
-      if (isOneApi) { params.cloudEnv = cloudEnv; params.vanityDomain = vanityDomain; }
+      if (isOneApi) { params.cloudEnv = cloudEnv; params.vanityDomain = vanityDomain; params.customerId = customerId; }
 
       const res = await axios.get('/api/zpa/validate', { params })
 
@@ -115,6 +117,7 @@ export default function ZPACredentials({ data, update, next }) {
         ...(authMode === 'apikey' ? (apiKey ? { apiKey } : {}) : (clientSecret ? { clientSecret } : {})),
       }).catch(() => {})
       setApiKey(''); setClientSecret('')
+      if (isOneApi) rememberCustomerId({ ...data, vanityDomain, cloudEnv }, customerId)
 
       update({
         authMode,
@@ -124,6 +127,7 @@ export default function ZPACredentials({ data, update, next }) {
         apiKey: undefined,
         clientId: authMode !== 'apikey' ? clientId : undefined,
         clientSecret: undefined,
+        customerId: isOneApi ? customerId : data.customerId,
         connectorGroups: res.data.connectorGroups,
         appSegments: res.data.appSegments,
         apiBase: res.data.base
@@ -309,10 +313,15 @@ export default function ZPACredentials({ data, update, next }) {
 
       {/* OneAPI notice */}
       {isOneApi && (
-        <div className="alert alert-warning">
-          ⚠️ <strong>OneAPI is in active rollout.</strong> App Shield scan endpoints may not yet be available via OneAPI — if scan creation fails, switch to API Key or OAuth. All other wizard steps will work.
+        <div className="form-group">
+          <label>ZPA Customer ID <span className="label-required">*</span></label>
+          <input type="text" inputMode="numeric" placeholder="e.g. 216196257331281920" value={customerId}
+            onChange={e => { setCustomerId(e.target.value.trim()); setError('') }} autoComplete="off" spellCheck={false} />
+          <div className="hint">The numeric ZPA tenant ID (digits only) — <strong>not</strong> the Zidentity tenant UUID. Experience Center: <strong>Private Access → Client Credentials</strong>, shown next to your API client; legacy ZPA Admin Portal: Configuration &amp; Control → Public API → API Keys. Asked once; later steps reuse it.</div>
+          {customerId && !/^\d+$/.test(customerId) && <div className="hint" style={{ color: '#b45309' }}>Digits only — a value with letters or dashes is the Zidentity tenant ID, not the ZPA customer ID.</div>}
         </div>
       )}
+      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>Zscaler has no API for creating App Shield scans on any auth mode; the Scan step walks you through that one portal task. Everything else is automated.</div>
 
       {error && (
         <div className="alert alert-error">

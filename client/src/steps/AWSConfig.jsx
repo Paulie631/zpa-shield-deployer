@@ -76,7 +76,7 @@ export default function AWSConfig({ data, update, next, back }) {
   const filteredSubnets = resources.subnets.filter(s => !form.vpcId || s.vpcId === form.vpcId)
 
   const isTempKey = /^ASIA/.test((form.accessKeyId || '').trim())
-  const canContinue = haveCreds && form.region && form.vpcId && form.subnetId && form.keyPairName
+  const canContinue = haveCreds && form.region && form.vpcId && form.subnetId
   // What the later steps get: only the chosen credential source. Pasted secrets go to the
   // backend's owner-only secrets file and are filled in server-side; the browser keeps the key ID only.
   const toSave = () => {
@@ -197,13 +197,13 @@ aws sso login --profile zscaler`}</pre>
 
       <div className="form-row">
         <div className="form-group">
-          <label>Key Pair Name</label>
+          <label>Key Pair Name <span className="hint" style={{ fontWeight: 400 }}>(optional)</span></label>
           <select value={form.keyPairName} onChange={e => set('keyPairName', e.target.value)}>
-            <option value="">-- Select Key Pair --</option>
+            <option value="">None — use Session Manager (EC2 → Connect) for a shell</option>
             {resources.keyPairs.map(k => <option key={k.name} value={k.name}>{k.name}</option>)}
             {!resources.keyPairs.length && form.keyPairName && <option value={form.keyPairName}>{form.keyPairName}</option>}
           </select>
-          {!resources.keyPairs.length && <div className="hint">Load resources above or type a key pair name manually</div>}
+          <div className="hint">Only needed if you want SSH. The scanner and test apps install the Session Manager agent, so EC2 → Connect gives a shell without SSH or open ports.</div>
         </div>
         <div className="form-group">
           <label>Instance Type</label>

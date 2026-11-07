@@ -289,7 +289,16 @@ const JOBS = {
 const FAIL_MARKER = 'SCRIPT FAILED';
 const CHUNK = 1500;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const csError = (err) => err.response?.data?.message || err.response?.data?.Message || err.message;
+// Translate CloudShare's terse API errors into something a user can act on
+const csError = (err) => {
+  const raw = err.response?.data?.message || err.response?.data?.Message || err.message || String(err);
+  const st = err.response?.status;
+  if (/HMAC/i.test(raw) || st === 401) return `CloudShare rejected the API credentials (${raw}). The API key is wrong or was retyped — leave the key blank to use the one saved on this Mac, or copy a fresh one from CloudShare → My Profile → API Keys.`;
+  if (st === 403) return `CloudShare says this API ID isn't allowed to do that (${raw}). Check the user behind the API key has access to the project/environment.`;
+  if (/already exists|name.*taken/i.test(raw)) return `${raw} — pick a different environment name.`;
+  if (/ECONNABORTED|timeout/i.test(raw)) return 'CloudShare did not answer in time. Try again; if it keeps happening, check use.cloudshare.com is reachable from this Mac.';
+  return raw;
+};
 
 // Run one command on the VM and wait for it to finish. Returns its stdout.
 async function runOnVm(apiId, apiKey, vmId, command, timeoutMs = 45000) {

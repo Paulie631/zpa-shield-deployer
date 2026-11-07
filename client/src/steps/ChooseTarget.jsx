@@ -23,8 +23,8 @@ export default function ChooseTarget({ data, update, next, back }) {
         <div className={`target-card ${selected === 'cloudshare' ? 'selected' : ''}`} onClick={() => choose('cloudshare')}>
           <div className="icon">🖥️</div>
           <h3>CloudShare</h3>
-          <p>Generate a fully pre-filled setup script for your CloudShare VM. One paste into the terminal and you're running. Full CloudShare API automation coming soon.</p>
-          <span className="badge" style={{ background: '#DBEAFE', color: '#1e40af' }}>📋 Script-Assisted</span>
+          <p>Create or reuse a CloudShare environment and run everything on its VMs through the CloudShare API — test apps, traffic connector and scanner. Nothing to paste.</p>
+          <span className="badge">✨ Fully Automated</span>
         </div>
       </div>
 

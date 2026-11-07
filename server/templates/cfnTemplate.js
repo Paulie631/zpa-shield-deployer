@@ -48,7 +48,7 @@ function generateCfnTemplate({ vpcId, subnetId, keyPairName, instanceType, ebsSi
         Properties: {
           ImageId: imageId || 'ami-0fe630eb857a6ec83',
           InstanceType: instanceType || 'c5.4xlarge',
-          KeyName: keyPairName,
+          ...(keyPairName ? { KeyName: keyPairName } : {}),
           SubnetId: subnetId,
           IamInstanceProfile: { Ref: 'ZPAScannerInstanceProfile' },
           SecurityGroupIds: [{ Ref: 'ZPAScannerSecurityGroup' }],

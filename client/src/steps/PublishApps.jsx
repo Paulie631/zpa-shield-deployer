@@ -173,7 +173,7 @@ export default function PublishApps({ data, update, next, back }) {
         <div className="form-group">
           <label>ZPA Customer ID</label>
           <input value={cid} placeholder="e.g. 216196257331281920" onChange={e => setCustomerId(e.target.value.trim())} />
-          <div className="hint">The numeric ZPA tenant ID (ZPA console → Configuration &amp; Control → Public API → API Keys) — not the Zidentity tenant ID.</div>
+          <div className="hint">The numeric ZPA tenant ID (Experience Center: Private Access → Client Credentials) — not the Zidentity tenant ID. Normally entered once on the ZPA Login step.</div>
         </div>
       )}
 
@@ -200,8 +200,8 @@ export default function PublishApps({ data, update, next, back }) {
               <option value="">All users</option>
               {(scim?.groups || []).map(g => <option key={g.id} value={g.id}>{g.name}{scim.idps.length > 1 ? ` (${g.idpName})` : ''}</option>)}
             </select>
-            <div className="hint">
-              {scim === null ? 'Loading groups from your identity provider...' : scim.groups.length === 0 ? 'No SCIM groups found — the rule will apply to all users. Groups appear here once SCIM provisioning is set up for your IdP in ZPA.' : 'Pick a group (e.g. a demo or SE group) to keep the vulnerable apps away from everyone else. Changing it and clicking Retry updates the rule.'}
+            <div className="hint" style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+              {scim === null ? 'Loading groups from your identity provider...' : scim.groups.length === 0 ? 'No SCIM groups in ZPA, so the rule applies to all users — fine for a demo tenant. To scope it to a group later, set up SCIM provisioning for your IdP in ZPA and re-run this step.' : 'Pick a group (e.g. a demo or SE group) to keep the vulnerable apps away from everyone else. Changing it and clicking Retry updates the rule.'}
             </div>
           </div>
         )} />
@@ -215,7 +215,7 @@ export default function PublishApps({ data, update, next, back }) {
       <div className="btn-row">
         <button className="btn btn-secondary" onClick={back} disabled={running}>← Back</button>
         {!allDone && (
-          <button className="btn btn-secondary" onClick={next} disabled={running}>Skip →</button>
+          <button className="btn btn-secondary" onClick={next} disabled={running} title="Skip only if the segments, server group and rule already exist in ZPA. Otherwise Verify and Scan will have nothing to check or scan.">Skip →</button>
         )}
         {allDone ? (
           <button className="btn btn-primary" onClick={next}>Continue to Verify Access →</button>

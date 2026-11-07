@@ -1,14 +1,15 @@
 import React, { useState } from 'react'
 import { zpaPortalBase } from '../lib/zpa'
 
+const EC = 'https://console.zscaler.com/private'
 const STEPS = (base, data) => [
   {
     id: 'version-profile',
     title: data.scannerVersionProfileName ? `Version profile: done — "${data.scannerVersionProfileName}" is pinned to the scanner group` : 'Set the scanner group’s version profile',
     desc: data.scannerVersionProfileName
       ? 'The wizard set this through the ZPA API on the Scanner Key step. Just confirm it shows in the portal.'
-      : 'Private Access → App Connector Groups → the AppScanner group → Edit → Version Profile: an AppShield profile if your tenant lists one, otherwise "New Release".',
-    link: `${base}/app#appConnectorGroups`,
+      : 'Private Access → Private Infrastructure → App Connector Groups → the AppScanner group → Edit → Version Profile: an AppShield profile if your tenant lists one, otherwise "New Release". The connector upgrades itself afterwards (a few minutes of Disconnected is normal).',
+    link: `${EC}/app-connector-groups`,
     linkLabel: '→ Open App Connector Groups'
   },
   {
@@ -16,22 +17,23 @@ const STEPS = (base, data) => [
     title: data.scannerReady ? 'Application Shield Scanning: done — the Scan step turned it on' : 'Enable Application Shield Scanning on the scanner connector',
     desc: data.scannerReady
       ? 'The Scan step also linked the scanner group to the test apps’ server group. Confirm the AppScanner row shows Application Shield Scanning: Enabled.'
-      : 'Private Access → App Connectors → the ZPA-AppScanner connector → Edit → Application Shield Scanning: Enabled. Leave it off on the traffic connector. Also make sure the scanner group is in the "ZPA Shield Test Apps" server group (Steering → Server Groups).',
-    link: `${base}/app#appConnectors`,
+      : 'Private Access → Private Infrastructure → App Connectors → the ZPA-AppScanner connector → Edit → Application Shield Scanning: Enabled. Leave it off on the traffic connector. Also make sure the scanner group is in the "ZPA Shield Test Apps" server group (Steering → Server Groups), or Add Scan shows "No Scanners available".',
+    link: `${EC}/app-connectors`,
     linkLabel: '→ Open App Connectors'
   },
   {
     id: 'verify-healthy',
     title: 'Verify the scanner connector is Connected',
     desc: 'App Connectors: the AppScanner row should show Connected. After a version-profile change it upgrades itself and shows Disconnected for a few minutes — wait for it rather than rebooting. Only reboot the VM if it stays disconnected for 15+ minutes.',
-    link: `${base}/app#appConnectors`,
+    link: `${EC}/app-connectors`,
     linkLabel: '→ Check App Connectors Status'
   },
   {
     id: 'run-scan',
     title: 'Run the scan and review the results',
     desc: 'Autonomous App Shield → Scans → ▷ on your scan. A run moves Requested → In Progress → Completed (High: roughly 10–90 minutes). Then Shield → Download Report, and Protection to deploy the recommended controls (e.g. a Block 403 rule).',
-    link: null
+    link: `${EC}/autonomous-app-shield/scans`,
+    linkLabel: '→ Open Scans'
   }
 ]
 
@@ -51,12 +53,9 @@ export default function PortalSteps({ data, update, next, back }) {
     <div className="card">
       <h2>Manual ZPA Portal Steps</h2>
       <p className="subtitle">
-        These steps can't be automated yet — they require clicks in the ZPA Admin Portal. Complete each one and check it off. The App Scanner won't appear in scan configuration until scanning is enabled.
+        A final checklist in Experience Center. Items marked “done” were already set through the API — just confirm them. Links open the Experience Center page (console.zscaler.com); if your tenant still uses the classic ZPA Admin Portal, the same pages are under Administration and Autonomous App Shield there.
       </p>
 
-      <div className="alert alert-warning">
-        ⚠️ <strong>Order matters:</strong> Install Docker and assign the version profile <em>before</em> enabling scanning mode.
-      </div>
 
       <ul className="checklist">
         {steps.map((s, i) => (

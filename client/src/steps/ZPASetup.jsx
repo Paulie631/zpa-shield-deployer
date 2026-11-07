@@ -32,6 +32,7 @@ export default function ZPASetup({ data, update, next, back }) {
   // Data from API
   const [customerId, setCustomerId] = useState(data.customerId || loadSavedCid(tenantKey))
   const [customerIdInput, setCustomerIdInput] = useState(data.customerId || loadSavedCid(tenantKey))
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [connectorGroups, setConnectorGroups] = useState(data.connectorGroups || [])
   const [serverGroups, setServerGroups]       = useState([])
   const [enrollmentCerts, setEnrollmentCerts] = useState([])
@@ -68,7 +69,7 @@ export default function ZPASetup({ data, update, next, back }) {
       setProfiles(list)
       // AppShield-named profile if the tenant has one; otherwise New Release (a current build, proven to scan)
       const best = list.find(p => /app ?shield/i.test(p.name)) || list.find(p => /shield|scanner/i.test(p.name)) || list.find(p => /new release/i.test(p.name))
-      if (!profileId && best) setProfileId(best.id)
+      if (!profileId && best) { setProfileId(best.id); setProfileMsg(`Will apply “${best.name}” to the scanner group (change it above if your tenant has a dedicated AppShield profile).`) }
       return list
     } catch (e) { setProfiles([]); return [] }
   }
@@ -271,10 +272,11 @@ export default function ZPASetup({ data, update, next, back }) {
       {/* Customer ID — needed for mgmtconfig API calls */}
       {authParams.authMode === 'oneapi' && (
         <div style={{ marginBottom: '10px' }}>
-          <button onClick={debugToken} disabled={debuggingToken}
+          {!showAdvanced && <button onClick={() => setShowAdvanced(true)} style={{ fontSize: 12, background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', padding: 0 }}>Advanced: inspect token / change customer ID</button>}
+          {showAdvanced && <button onClick={debugToken} disabled={debuggingToken}
             style={{ fontSize: '12px', padding: '4px 10px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: '#f9fafb' }}>
             {debuggingToken ? '...' : '🔍 Inspect Token Claims'}
-          </button>
+          </button>}
           {tokenClaims && !tokenClaims.error && (
             <div style={{ marginTop: '8px', padding: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', fontSize: '12px' }}>
               <strong>Token Claims:</strong><br/>
@@ -288,7 +290,7 @@ export default function ZPASetup({ data, update, next, back }) {
           {tokenClaims?.error && <span style={{ marginLeft: '8px', color: '#dc2626', fontSize: '12px' }}>{tokenClaims.error}</span>}
         </div>
       )}
-      <div className="form-group">
+      {(showAdvanced || !/^\d+$/.test(customerIdInput || '')) && <div className="form-group">
         <label>ZPA Customer ID</label>
         <input type="text"
           placeholder="e.g. 216196257331281920"
@@ -296,11 +298,11 @@ export default function ZPASetup({ data, update, next, back }) {
           onChange={e => setCustomerIdInput(e.target.value.trim())}
           onBlur={e => { const v = e.target.value.trim(); setCustomerIdInput(v); setCustomerId(v); if (v) loadAll(v); }}
         />
-        <div className="hint">The numeric ZPA tenant ID (digits only) — <strong>not</strong> the Zidentity tenant ID. Find it in the ZPA console under <strong>Configuration &amp; Control → Public API → API Keys</strong>.</div>
+        <div className="hint">The numeric ZPA tenant ID (digits only) — <strong>not</strong> the Zidentity tenant ID. Entered on the ZPA Login step; change it here only if that was wrong (Experience Center: Private Access → Client Credentials).</div>
         {customerIdInput && !/^\d+$/.test(customerIdInput) && (
           <div className="hint" style={{ color: '#dc2626' }}>This doesn’t look like a ZPA Customer ID — it should be digits only.</div>
         )}
-      </div>
+      </div>}
       {createMsg && (
         <div className={`alert ${createMsg.startsWith('✅') ? 'alert-info' : 'alert-error'}`} style={{ marginBottom: '12px' }}>
           {createMsg}

@@ -78,10 +78,23 @@ function checkZpaCustomerId(customerId) {
 const ENROLLMENT_CERT_URL = (mgmtBase) => mgmtBase.replace('/mgmtconfig/v1/', '/mgmtconfig/v2/') + '/enrollmentCert';
 
 // One place to turn an axios/ZPA error into a message for the UI
+// Translate ZPA's terse API errors into something a user can act on. Raw text stays in parentheses.
 function zpaError(err) {
   if (/^Token request to /.test(err.message || '')) return err.message;   // already explained
   const d = err.response?.data;
-  return (d && (d.message || d.reason || d.exception)) || err.message;
+  const raw = (d && (d.message || d.reason || d.exception || d.error)) || err.message || String(err);
+  const st = err.response?.status;
+  const id = d?.id ? ` [${d.id}]` : '';
+  if (st === 401) return `ZPA rejected the token (401${id}). The OneAPI client needs the ZPA resource with read/write scopes — Experience Center → Private Access → Client Credentials → your client. (${raw})`;
+  if (st === 403) return `ZPA says this API client isn't allowed to do that (403${id}). Add the ZPA resource/role to the OneAPI client in Private Access → Client Credentials. (${raw})`;
+  if (/No handler found/i.test(raw)) return `ZPA has no API for this on your tenant (“${raw}”). Use the portal steps shown.`;
+  if (/already exists.*within the last 12 hours/i.test(raw)) return `${raw} — ZPA allows one scan request per app segment per 12 hours, and an earlier request is still pending. Wait it out, or scan the same VM through a new segment that uses its private DNS name.`;
+  if (/already exists/i.test(raw)) return `${raw} — an object with that name already exists in ZPA; the wizard normally reuses it, so click the retry/“Check again” button.`;
+  if (/Invalid operand/i.test(raw)) return `ZPA rejected a search filter (${raw}). This is a wizard bug — please report it; in the meantime the object can be picked by hand in the portal.`;
+  if (/bad\.request/i.test(raw) && /customers\//.test(err.config?.url || '')) return `ZPA returned bad.request. The usual cause is a wrong ZPA Customer ID (it must be the numeric ZPA tenant ID, not the Zidentity UUID) — check it on the ZPA Login step. (${raw})`;
+  if (/ENOTFOUND|EAI_AGAIN/.test(raw)) return `This Mac can't resolve ${err.hostname || 'the Zscaler API host'} (${raw}). Check its network/VPN/Client Connector, then retry.`;
+  if (st >= 500) return `Zscaler's API returned ${st} (${raw}). Usually transient — retry in a minute.`;
+  return raw;
 }
 
 /**
@@ -555,9 +568,9 @@ router.post('/verify-publish', async (req, res) => {
       checks.push({
         id: 'idp', ok: covering.length > 0,
         label: domain ? `IdP with Client Connector SSO for @${domain}` : 'IdP with Client Connector SSO for users',
-        detail: idps.length === 0 ? 'No IdP configured in ZPA. Add one (Zidentity) under Administration → Private Access Authentication / IdP Configuration, with Single Sign-On: User and the users\' email domain.'
-          : usable.length === 0 ? `IdPs exist (${idps.map(describe).join('; ')}) but none is enabled with Single Sign-On for Users.`
-          : covering.length === 0 ? `Enabled user IdPs: ${usable.map(describe).join('; ')} — none lists @${domain}. Add the domain to the IdP (for Zidentity: Zidentity → Organization → Domains), or ZCC will say "Unable to verify the IdP configuration for this domain".`
+        detail: idps.length === 0 ? 'No IdP configured in ZPA, so Client Connector cannot sign users in for Private Access. Experience Center: Private Access → Private Access Authentication → IdP Configuration → Add, Single Sign-On: User, with the users\' email domain; or ask Zscaler to enable Zidentity end-user authentication for the tenant.'
+          : usable.length === 0 ? `IdPs exist (${idps.map(describe).join('; ')}) but none is enabled with Single Sign-On for Users — the built-in ZSlogin entry is admin-only until Zidentity end-user authentication is enabled for the tenant (ask Zscaler), or add your own user IdP (free Okta works — see README, "ZPA user sign-in").`
+          : covering.length === 0 ? `Enabled user IdPs: ${usable.map(describe).join('; ')} — none covers @${domain}, so Client Connector will say "Unable to verify the IdP configuration for this domain" when it tries to register for ZPA. Fix: edit that IdP and add ${domain} to its domains; if the IdP's domains can't be edited (Zidentity-managed), either ask Zscaler to enable Zidentity end-user authentication for this tenant, or add your own IdP (a free Okta org works — see README, "ZPA user sign-in").`
           : covering.map(describe).join('; '),
       });
     } catch (e) {
@@ -597,6 +610,22 @@ router.post('/teardown', async (req, res) => {
       const seg = await findByName(base, headers, 'application', app.name);
       if (seg) await del(`App segment "${app.name}"`, `application/${seg.id}?forceDelete=true`);
       else note(`App segment "${app.name}"`, true, 'already gone');
+    }
+
+    // Any other segment in our segment group (e.g. a private-DNS segment added by hand for a re-scan)
+    const sgForExtras = await findByName(base, headers, 'segmentGroup', TEST_SEGMENT_GROUP);
+    if (sgForExtras) {
+      try {
+        const all = [];
+        for (let page = 1; page <= 20; page++) {
+          const r = await axios.get(`${base}/application`, { headers, params: { page, pagesize: 500 }, timeout: 15000 });
+          all.push(...(r.data.list || []));
+          if (page >= (parseInt(r.data.totalPages, 10) || 1)) break;
+        }
+        for (const seg of all.filter(a => String(a.segmentGroupId) === String(sgForExtras.id))) {
+          await del(`App segment "${seg.name}" (in ${TEST_SEGMENT_GROUP})`, `application/${seg.id}?forceDelete=true`);
+        }
+      } catch (e) { note('Other segments in the test apps group', false, zpaError(e)); }
     }
 
     // Server group, segment group
@@ -661,7 +690,16 @@ router.post('/test-app-segments', async (req, res) => {
     for (const app of TEST_APPS) {
       stage = `creating the ${app.name} app segment`;
       const existing = await findByName(base, headers, 'application', app.name);
-      if (existing) { segments.push(existing); steps.push(`"${app.name}" already exists — left unchanged`); continue; }
+      if (existing) {
+        const current = existing.domainNames || [];
+        if (current.length === 1 && current[0] === ip) { segments.push(existing); steps.push(`"${app.name}" already exists → ${ip}:${app.port}`); continue; }
+        // Test apps were redeployed on a new address: repoint the segment rather than leave it stale
+        const full = (await axios.get(`${base}/application/${existing.id}`, { headers, timeout: 15000 })).data;
+        await axios.put(`${base}/application/${existing.id}`, { ...full, domainNames: [ip], serverGroups: [{ id: srv.id }], segmentGroupId: sg.id }, { headers, timeout: 15000 });
+        segments.push({ ...full, domainNames: [ip] });
+        steps.push(`"${app.name}" existed but pointed at ${current.join(', ') || 'nothing'} — repointed to ${ip}:${app.port}`);
+        continue;
+      }
       const r = await axios.post(`${base}/application`, {
         name: app.name,
         description: 'Test app deployed by ZPA Shield Deployer',

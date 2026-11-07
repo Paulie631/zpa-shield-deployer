@@ -157,7 +157,7 @@ export default function VerifyAccess({ data, update, next, back }) {
   return (
     <div className="card">
       <h2>Verify Access through ZPA</h2>
-      <p className="subtitle">Before adding the scanner, prove a user can reach DVWA and Juice Shop through ZPA: the wizard checks what’s published in ZPA, then has a CloudShare VM with Zscaler Client Connector open both apps.</p>
+      <p className="subtitle">Before adding the scanner, prove a user can reach DVWA and Juice Shop through ZPA: the wizard checks what’s published in ZPA, then you open both apps from a device running Zscaler Client Connector — your own laptop, or a CloudShare VM it can set up for you.</p>
 
       {!ip && <div className="alert alert-warning"><span>⚠️ No test apps address yet — deploy and publish the test apps first.</span></div>}
 
@@ -285,7 +285,7 @@ export default function VerifyAccess({ data, update, next, back }) {
 
       <div className="btn-row">
         <button className="btn btn-secondary" onClick={back}>← Back</button>
-        {!verified && <button className="btn btn-secondary" onClick={next}>Skip →</button>}
+        {!verified && <button className="btn btn-secondary" onClick={next} title="Skips the proof that a user can reach the apps. The scanner will still deploy, but if access is broken you’ll find out from an empty scan rather than here.">Skip →</button>}
         <button className="btn btn-primary" onClick={next} disabled={!verified}>Continue to Scanner Setup →</button>
       </div>
     </div>

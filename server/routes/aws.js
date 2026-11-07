@@ -268,7 +268,7 @@ router.post('/deploy-test-apps', async (req, res) => {
           Properties: {
             ImageId: imageId,
             InstanceType: instanceType || 't3.medium',
-            KeyName: keyPairName,
+            ...(keyPairName ? { KeyName: keyPairName } : {}),
             SubnetId: subnetId,
             SecurityGroupIds: [{ Ref: 'TestAppsSecurityGroup' }],
             BlockDeviceMappings: [{ DeviceName: '/dev/sda1', Ebs: { VolumeSize: 40, VolumeType: 'gp3' } }],
@@ -332,7 +332,7 @@ router.post('/deploy-traffic-connector', async (req, res) => {
           Properties: {
             ImageId: imageId,
             InstanceType: 't3.medium',
-            KeyName: keyPairName,
+            ...(keyPairName ? { KeyName: keyPairName } : {}),
             SubnetId: subnetId,
             SecurityGroupIds: [{ Ref: 'TrafficConnectorSecurityGroup' }],
             UserData: Buffer.from(generateConnectorScript({ provisioningKey })).toString('base64'),

@@ -14,16 +14,16 @@ A 9-step guided wizard that automates the full ZPA App Shield deployment:
 
 | Step | What happens |
 |------|-------------|
-| 1 | Connect to your ZPA tenant (OneAPI/Zidentity, API key or OAuth) |
+| 1 | Connect to your ZPA tenant (OneAPI/Zidentity, API key or OAuth) and enter the numeric ZPA Customer ID once |
 | 2 | Choose AWS or CloudShare |
-| 3 | Configure your AWS environment — pick an AWS CLI profile (SSO sessions refresh themselves) or paste keys — plus VPC, subnet and key pair; or pick your CloudShare VMs |
+| 3 | Configure your AWS environment — pick an AWS CLI profile (SSO sessions refresh themselves) or paste keys — plus VPC and subnet (key pair optional — the instances run the Session Manager agent, so EC2 → Connect gives a shell); or pick your CloudShare VMs |
 | 4 | Deploy DVWA + OWASP Juice Shop as vulnerable test apps |
 | 5 | **Publish them through ZPA:** a traffic App Connector (deployed on AWS), app segments for both apps, and an access policy rule |
 | 6 | **Verify access:** ZPA-side checks (connector online, segments, rule); a Zidentity check of the user you sign in to Client Connector with (exists, covered by the rule, Private Access entitlement — one click adds them to the `ZPA Shield Test Users` group, which you link to the Private Access entitlement once in the portal); then a CloudShare VM with Zscaler Client Connector opens both apps, plus a manual check |
 | 7 | Create or pick the App Scanner's connector group + provisioning key |
 | 8 | **AWS:** launch the App Scanner via CloudFormation (Session Manager enabled, so EC2 → Connect gives a shell) · **CloudShare:** run the setup script on the VM |
 | 9 | **Scanner readiness** via the API — adds the App Scanner group to the test apps' server group, turns on Application Shield Scanning for the scanner connector (off for traffic connectors) and checks it's online; then configure the scan (ZPA has no scan API, so the wizard gives exact portal steps: Private Access → Autonomous App Shield → Scans) |
-| 10 | Manual ZPA portal checklist with deep links |
+| 10 | Final Experience Center checklist with deep links (items already done through the API are marked) |
 | 11 | Summary + links |
 
 ---

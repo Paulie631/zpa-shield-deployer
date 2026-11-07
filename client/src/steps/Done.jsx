@@ -5,6 +5,7 @@ import TearDown from '../components/TearDown'
 export default function Done({ data, goTo }) {
   const isAWS = data.target === 'aws'
   const tenantBase = zpaPortalBase(data)
+  const EC = 'https://console.zscaler.com/private'
   const segments = (data.appSegments || []).filter(s => (data.selectedSegmentIds || []).includes(s.id))
 
   return (
@@ -13,7 +14,7 @@ export default function Done({ data, goTo }) {
         <div style={{ fontSize: 56, marginBottom: 12 }}>🛡️</div>
         <h2 style={{ fontSize: 26 }}>Deployment Complete!</h2>
         <p className="subtitle" style={{ maxWidth: 480, margin: '8px auto 0' }}>
-          Your ZPA Autonomous Application Shield is deployed and scanning. Here's a summary of what was set up.
+          {data.scanCreatedManually ? 'Everything is deployed; the scan you created in the portal runs on its schedule (or press ▷ on it to run now).' : 'Your ZPA Autonomous Application Shield is deployed and scanning.'} Here's a summary of what was set up.
         </p>
       </div>
 
@@ -58,24 +59,23 @@ export default function Done({ data, goTo }) {
 
       <hr className="divider" />
 
-      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>🔗 Quick Links — ZPA Admin Portal</h3>
+      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>🔗 Quick Links — Experience Center</h3>
       <div className="portal-links">
-        <a className="portal-link" href={`${tenantBase}/app#autonomousApplicationShield/scans`} target="_blank" rel="noreferrer">📋 Scans</a>
-        <a className="portal-link" href={`${tenantBase}/app#autonomousApplicationShield/shield`} target="_blank" rel="noreferrer">🛡️ Shield — Findings</a>
-        <a className="portal-link" href={`${tenantBase}/app#autonomousApplicationShield/shieldProfiles`} target="_blank" rel="noreferrer">⚙️ Shield Profiles</a>
-        <a className="portal-link" href={`${tenantBase}/app#appProtectionLogs`} target="_blank" rel="noreferrer">📊 AppProtection Logs</a>
-        <a className="portal-link" href={`${tenantBase}/app#appConnectors`} target="_blank" rel="noreferrer">🔌 App Connectors</a>
+        <a className="portal-link" href={`${EC}/autonomous-app-shield/scans`} target="_blank" rel="noreferrer">📋 Scans</a>
+        <a className="portal-link" href={`${EC}/autonomous-app-shield/shield`} target="_blank" rel="noreferrer">🛡️ Shield — Findings</a>
+        <a className="portal-link" href={`${EC}/autonomous-app-shield/shield-profiles`} target="_blank" rel="noreferrer">⚙️ Shield Profiles</a>
+        <a className="portal-link" href={`${EC}/app-connectors`} target="_blank" rel="noreferrer">🔌 App Connectors</a>
       </div>
 
       <hr className="divider" />
 
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>📋 What to Do Next</h3>
       <ol style={{ paddingLeft: 20, fontSize: 14, lineHeight: 2, color: '#374151' }}>
-        <li>Wait for the first scan to run (or trigger it manually from the Scans page)</li>
-        <li>Review findings in <strong>Shield → Scan Status</strong></li>
-        <li>Click <strong>Protect</strong> on your app segment</li>
-        <li>Start with <strong>Monitor mode</strong> — review AppProtection logs</li>
-        <li>Switch confirmed controls to <strong>Block mode</strong></li>
+        <li>Run the scan now: <strong>Scans → ▷</strong> on your scan (High takes roughly 10–90 minutes). It moves Requested → In Progress → Completed under <strong>Shield</strong>.</li>
+        <li>In <strong>Shield</strong>, click <strong>Download Report</strong> — critical findings come with a ready-made control (e.g. “Block 403” for exposed source/credential paths).</li>
+        <li>Prove the exposure from your Client Connector device (e.g. <code>http://{data.testAppsPrivateIp || '<test-apps-ip>'}/.git/HEAD</code>), then open the segment → <strong>Protection</strong> and deploy the control.</li>
+        <li>Reload the same URL: it should now return 403 from ZPA — protected inline with no patching.</li>
+        <li>For production apps start controls in <strong>Monitor</strong> mode and promote confirmed ones to <strong>Block</strong>.</li>
       </ol>
 
       <hr className="divider" />

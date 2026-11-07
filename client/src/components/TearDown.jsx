@@ -58,7 +58,7 @@ export default function TearDown({ data }) {
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>🧹 Tear down this deployment</h3>
       <div className="hint" style={{ marginBottom: 10 }}>Removes what the wizard created so you can run the demo again from scratch (and stop paying for the instances). Only objects created by this wizard are touched.</div>
       {isAWS && <Opt k="awsStacks" label="AWS stacks" hint="zpa-traffic-connector, zpa-app-scanner, zpa-test-apps — and the provisioning key in SSM" />}
-      <Opt k="zpaObjects" label="ZPA objects" hint="Access rule, both test app segments, their server and segment groups, the traffic connector group with its connectors and keys" />
+      <Opt k="zpaObjects" label="ZPA objects" hint="Access rule, every app segment in the “ZPA Shield Test Apps” segment group (including any you added by hand, e.g. a private-DNS one), its server and segment groups, the traffic connector group with its connectors and keys" />
       <Opt k="scannerGroup" label="Also the App Scanner connector group" hint="Its connector, provisioning key and group. Leave unticked to keep the scanner enrolled." />
       {data.clientEnvId && <Opt k="clientEnv" label="CloudShare test client environment" hint="The Client Connector VM created for the access test" />}
       {!isAWS && <div className="hint" style={{ marginTop: 6 }}>CloudShare VMs for the apps and scanner are left as they are — delete them in the CloudShare portal if you no longer need them.</div>}

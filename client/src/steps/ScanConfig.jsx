@@ -55,7 +55,7 @@ export default function ScanConfig({ data, update, next, back }) {
     if (data.target !== 'aws' || !data.vpcId) return
     axios.post('/api/aws/open-scan-paths', {
       ...awsAuth(data), vpcId: data.vpcId, scannerStack: data.scannerStackName || 'zpa-app-scanner',
-    }).then(r => setNetNote('✅ Network paths for scanning are open: ' + (r.data.done || []).join('; ')))
+    }).then(r => { const d = r.data.done || []; const skipped = d.every(x => /skipped/i.test(x)); setNetNote((skipped ? '⚠️ Network paths not opened yet: ' : '✅ Network paths for scanning are open: ') + d.join('; ') + (skipped ? ' — deploy the test apps and scanner stacks first.' : '')) })
       .catch(e => setNetNote('⚠️ Couldn’t check the AWS network rules: ' + (e.response?.data?.error || e.message)))
   }, [])
 
@@ -106,7 +106,8 @@ export default function ScanConfig({ data, update, next, back }) {
       update({ selectedSegmentIds: selectedSegments, probingLevel, frequency, startTime, scanName, scanProfileId: res.data.scanProfileId, scanId: res.data.scanId })
       next()
     } catch (err) {
-      setError(err.response?.data?.error || err.message)
+      const raw = err.response?.data?.error || err.message
+      setError(raw)   // the server already translates ZPA's errors
       setApiFailed(true)
     } finally {
       setLoading(false)
@@ -148,7 +149,7 @@ export default function ScanConfig({ data, update, next, back }) {
       )}
 
       <div className="form-group">
-        <label>App Segments to Scan <span style={{ color: '#9ca3af', fontWeight: 400 }}>({selectedSegments.length} selected)</span></label>
+        <label>App Segments to Scan <span style={{ color: '#9ca3af', fontWeight: 400 }}>({segments.filter(x => selectedSegments.includes(x.id)).length} selected)</span></label>
         {loadingSegs ? (
           <div className="hint">🔄 Loading app segments from ZPA...</div>
         ) : segError ? (
@@ -205,35 +206,40 @@ export default function ScanConfig({ data, update, next, back }) {
         </div>
       </div>
 
+      {(() => {
+        const picked = segments.filter(x => selectedSegments.includes(x.id))
+        const intensity = PROBING.find(p => p.level === probingLevel)?.label
+        const dnsName = testIp && /^172\.31\./.test(testIp) ? `ip-${testIp.replace(/\./g, '-')}.ec2.internal` : (testIp ? `ip-${testIp.replace(/\./g, '-')}.<region>.compute.internal` : 'the VM’s private DNS name')
+        return (
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, marginTop: 4 }}>
+            <strong>Create the scan in the portal</strong> <span className="hint">(about a minute — Zscaler has no API for this on any auth mode)</span>
+            <ol style={{ margin: '8px 0 0 18px', padding: 0, fontSize: 14 }}>
+              <li>Experience Center → <strong>Private Access → Autonomous App Shield → Scans → Add</strong> (<a href="https://console.zscaler.com/private/autonomous-app-shield/scans" target="_blank" rel="noreferrer">open</a>).</li>
+              <li>Name <strong>{scanName || 'Shield Scan'}</strong>, Status Enable. Scan Profile → <strong>New Scan Profile</strong>: name <strong>{scanName || 'Shield Scan'} - {intensity}</strong>, intensity <strong>{intensity}</strong>, interval <strong>{frequency.charAt(0) + frequency.slice(1).toLowerCase()}</strong>, start <strong>{startTime} UTC</strong>.</li>
+              <li>Application Segments: <strong>{picked.map(x => x.name).join(', ') || '— tick at least one above —'}</strong>.</li>
+              <li>App Scanner: <strong>{(data.scannerConnectorNames || []).join(' / ') || 'the ZPA-AppScanner-Key connector'}</strong> — never the traffic connector. If the list says “No Scanners available for the selected Application Segments”, the readiness checks above aren’t green yet.</li>
+              <li>Save, then press <strong>▷</strong> on the scan’s row to run it now. Watch it under <strong>Autonomous App Shield → Shield</strong>: Requested → In Progress → Completed (High ≈ 10–90 min). Then <strong>Download Report</strong>, and <strong>Protection</strong> to deploy the recommended controls.</li>
+            </ol>
+            <div className="hint" style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>Stuck at “Requested” for 15+ minutes, or “An active scan request for this app segment already exists within the last 12 hours”? That segment is locked by an earlier request. Add a second segment for the same VM using its private DNS name <code>{dnsName}</code> (ports 80 and 3000, segment group and server group “ZPA Shield Test Apps”) and scan that instead.</div>
+          </div>
+        )
+      })()}
+
       {error && (
-        <div className="alert alert-error" style={{ display: 'block' }}>
+        <div className="alert alert-error" style={{ display: 'block', marginTop: 10 }}>
           ⚠️ {error}
-          {apiFailed && (
-            <div style={{ marginTop: 6, color: '#334155' }}>
-              Zscaler doesn’t document an API for creating App Shield scans, so create it in the portal — about a minute:
-              <ol style={{ margin: '6px 0 0 18px', padding: 0 }}>
-                <li>Experience Center → <strong>Private Access → Autonomous App Shield → Scans → Add</strong>.</li>
-                <li>Name <strong>{scanName}</strong>, Status Enable, <strong>New Scan Profile</strong>: name <strong>{scanName} - {PROBING.find(p => p.level === probingLevel)?.label}</strong>, intensity <strong>{PROBING.find(p => p.level === probingLevel)?.label}</strong>, interval <strong>{frequency.charAt(0) + frequency.slice(1).toLowerCase()}</strong>, start <strong>{startTime} UTC</strong>.</li>
-                <li>Application Segments: <strong>{segments.filter(x => selectedSegments.includes(x.id)).map(x => x.name).join(', ') || '(the ones ticked above)'}</strong>.</li>
-                <li>App Scanner: <strong>{(data.scannerConnectorNames || []).join(' / ') || 'the ZPA-AppScanner-Key connector'}</strong> — not the traffic connector. If the list says “No Scanners available”, the readiness checks above aren’t green yet.</li>
-                <li>Save, then press <strong>▷</strong> on the scan’s row to run it now. Results appear under <strong>Autonomous App Shield → Shield</strong> (download the report, then <strong>Protection</strong> for recommended controls).</li>
-              </ol>
-              <div className="hint" style={{ marginTop: 6 }}>If a run stays at “Requested” and a new run says “An active scan request for this app segment already exists within the last 12 hours”, add a second segment for the same VM using its private DNS name (e.g. ip-172-31-93-7.ec2.internal, ports 80 and 3000, same segment and server group) and scan that.</div>
-            </div>
-          )}
         </div>
       )}
 
       <div className="btn-row">
         <button className="btn btn-secondary" onClick={back}>← Back</button>
-        {apiFailed && (
-          <button className="btn btn-secondary" onClick={() => { update({ selectedSegmentIds: selectedSegments, probingLevel, frequency, startTime, scanName, scanCreatedManually: true }); next() }}>
-            I’ll create it in the portal — Continue →
-          </button>
-        )}
-        <button className="btn btn-primary" onClick={createScan}
-          disabled={loading || selectedSegments.length === 0 || !scanName}>
-          {loading ? <><span className="spinner" /> Creating scan...</> : '✅ Create Scan & Continue →'}
+        <button className="btn btn-secondary" onClick={createScan} disabled={loading || selectedSegments.length === 0 || !scanName}
+          title="Zscaler documents no scan API; this tries one anyway in case your tenant has it.">
+          {loading ? <><span className="spinner spinner-blue" /> Trying the API...</> : 'Try creating it via API'}
+        </button>
+        <button className="btn btn-primary" disabled={selectedSegments.length === 0 || !scanName}
+          onClick={() => { update({ selectedSegmentIds: selectedSegments, probingLevel, frequency, startTime, scanName, scanCreatedManually: true }); next() }}>
+          I’ve created it in the portal — Continue →
         </button>
       </div>
     </div>

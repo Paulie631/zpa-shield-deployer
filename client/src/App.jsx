@@ -59,12 +59,12 @@ export default function App() {
   const steps = [
     'ZPA Login',
     'Target',
-    isAWS ? 'AWS' : 'CloudShare',
+    isAWS ? 'AWS' : isCloudShare ? 'CloudShare' : 'Target setup',
     'Test Apps',
     'Publish',
     'Verify',
     'Scanner Key',
-    isAWS ? 'Scanner' : 'Scanner Script',
+    isAWS || !isCloudShare ? 'Scanner' : 'Scanner VM',
     'Scan',
     'Portal',
     'Done'
