@@ -190,7 +190,7 @@ export default function PublishApps({ data, update, next, back }) {
           </div>
         ))} />
       <Part n={2} title="App segments" part={segs} onRetry={() => doSegments().catch(() => {})}
-        desc={<>Six segments at {ip || '?'}, in segment group “ZPA Shield Test Apps”: DVWA (80, TLS 443), Juice Shop (3000, HTTP 8080, TLS 8443) and WebGoat (8081). One segment per endpoint gives App Shield distinct targets to fingerprint and keeps ZPA’s per-segment scan lock from blocking everything at once.</>} />
+        desc={<>Nine segments at {ip || '?'}, in segment group “ZPA Shield Test Apps”: DVWA (80, TLS 443), Juice Shop (3000, HTTP 8080, TLS 8443), WebGoat (8081), Apache httpd 2.4.49 (8082), Tomcat 8.5 (8083) and WordPress 4.9 (8084). One segment per endpoint gives App Shield distinct targets to fingerprint and keeps ZPA’s per-segment scan lock from blocking everything at once.</>} />
       <Part n={3} title="Access policy rule" part={rule} onRetry={() => doRule().catch(() => {})}
         desc={<>“ZPA Shield - allow test apps” — lets users reach the ZPA Shield Test Apps segment group.</>}
         extra={(

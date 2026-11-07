@@ -122,7 +122,7 @@ API Routes:
 
 ## Test Applications
 
-The wizard deploys three intentionally vulnerable apps on one VM and exposes them as **six endpoints**, each with its own ZPA app segment. App Shield fingerprints by port, runs a TLS phase and matches CVEs by detected software version, so the same app on a standard port, behind TLS and on its native port gives the scanner far more to report than two bare HTTP ports did.
+The wizard deploys three OWASP training apps and three old mainstream servers on one VM (t3.large on AWS) and exposes them as **nine endpoints**, each with its own ZPA app segment. App Shield fingerprints by port, runs a TLS phase and matches CVEs by detected software version, so the same app on a standard port, behind TLS and on its native port gives the scanner far more to report than two bare HTTP ports did.
 
 | Segment | Port | What's behind it |
 |---------|------|------------------|
@@ -132,6 +132,9 @@ The wizard deploys three intentionally vulnerable apps on one VM and exposes the
 | ZPA Shield - Juice Shop (HTTP 8080) | 8080 | nginx → Juice Shop on a standard web port (avoids the “ppp” fingerprint on 3000) |
 | ZPA Shield - Juice Shop (TLS) | 8443 | nginx TLS → Juice Shop |
 | ZPA Shield - WebGoat | 8081 | [OWASP WebGoat](https://github.com/WebGoat/WebGoat) v2023.4 — a Java/Spring stack |
+| ZPA Shield - Apache httpd 2.4.49 | 8082 | Official `httpd:2.4.49` image — a release with a well-known 2021 CVE that App Shield's own check confirms |
+| ZPA Shield - Tomcat 8.5 | 8083 | `tomcat:8.5.0-jre8` — Java server fingerprint with a long version-CVE list |
+| ZPA Shield - WordPress 4.9 | 8084 | `wordpress:4.9.0-php7.0-apache` + MySQL 5.7 (internal only); the installer is completed automatically |
 
 Images are pinned to older builds on purpose (`server/lib/testApps.js`). To get more findings still: scan each segment separately at **High** intensity, and ask the AAS team about authenticated scanning — most of DVWA's and Juice Shop's intended flaws sit behind a login.
 

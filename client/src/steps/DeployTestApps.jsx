@@ -8,6 +8,9 @@ const APPS = [
   { name: 'DVWA', icon: '🎯', port: 80, extra: '+ TLS on 443', desc: 'Damn Vulnerable Web App on a dated Apache/PHP stack — SQLi, XSS, CSRF, file inclusion, command injection.', color: '#FEE2E2' },
   { name: 'Juice Shop', icon: '🥤', port: 3000, extra: '+ HTTP on 8080, TLS on 8443', desc: 'OWASP Juice Shop (2022 build) — 100+ intentional flaws across the OWASP Top 10, in a realistic e-commerce app.', color: '#FEF3C7' },
   { name: 'WebGoat', icon: '🐐', port: 8081, extra: '', desc: 'OWASP WebGoat — a Java/Spring stack with its own set of lessons and known CVEs, for a third server fingerprint.', color: '#E0F2FE' },
+  { name: 'Apache httpd 2.4.49', icon: '🪶', port: 8082, extra: '', desc: 'The 2021 path-traversal release. App Shield already runs this exact check — here it becomes a confirmed critical with a Block control.', color: '#FCE7F3' },
+  { name: 'Tomcat 8.5', icon: '🐱', port: 8083, extra: '', desc: 'An early 8.5 build: a Java server fingerprint with a long version-CVE list and the manager app the scanner recognises.', color: '#FEF9C3' },
+  { name: 'WordPress 4.9', icon: '📰', port: 8084, extra: '', desc: 'The most common real-world app, on old PHP — dozens of version CVEs and the largest Nuclei template family. Installer completes automatically.', color: '#DCFCE7' },
 ]
 
 export default function DeployTestApps({ data, update, next, back }) {
@@ -88,7 +91,7 @@ export default function DeployTestApps({ data, update, next, back }) {
         vpcId: data.vpcId,
         subnetId: data.subnetId,
         keyPairName: data.keyPairName,
-        instanceType: 't3.medium',
+        instanceType: 't3.large',
         stackName: 'zpa-test-apps'
       })
       setLaunched(true)
@@ -148,7 +151,7 @@ export default function DeployTestApps({ data, update, next, back }) {
     <div className="card">
       <h2>🧪 Deploy Test Applications</h2>
       <p className="subtitle">
-        Deploy intentionally vulnerable apps to give the App Scanner something to find. Three apps on dated stacks, each also exposed behind a TLS front door and on a standard web port, so App Shield's port fingerprinting, TLS checks and CVE matching all have material to work with — six endpoints, six ZPA segments.
+        Deploy intentionally vulnerable apps to give the App Scanner something to find. Three OWASP training apps plus three old mainstream servers (Apache httpd, Tomcat, WordPress), with a TLS front door and a standard-port alias for Juice Shop, so App Shield's port fingerprinting, TLS checks, version-CVE matching and exploit confirmation all have material to work with — nine endpoints, nine ZPA segments.
       </p>
 
       <div className="app-cards">
@@ -168,7 +171,7 @@ export default function DeployTestApps({ data, update, next, back }) {
 
       {isAWS && (
         <div className="alert alert-info" style={{ marginTop: 4 }}>
-          ℹ️ Deploys a <strong>t3.medium</strong> EC2 instance running RHEL 9 with Docker. DVWA, Juice Shop, WebGoat and an nginx TLS front door start automatically. Inbound is limited to the test-app ports from inside the VPC (for the traffic connector and the scanner) — users reach it only through ZPA.
+          ℹ️ Deploys a <strong>t3.large</strong> EC2 instance running RHEL 9 with Docker. DVWA, Juice Shop, WebGoat, Apache httpd 2.4.49, Tomcat 8.5, WordPress 4.9 (with MySQL) and an nginx TLS front door start automatically. Inbound is limited to the test-app ports from inside the VPC (for the traffic connector and the scanner) — users reach it only through ZPA.
         </div>
       )}
 
@@ -176,7 +179,7 @@ export default function DeployTestApps({ data, update, next, back }) {
         <div style={{ marginTop: 4, marginBottom: 12, padding: 14, border: '1px solid #bfdbfe', borderRadius: 8, background: '#eff6ff' }}>
           <strong>Deploy on {data.csTestVmName || 'the test apps VM'}</strong>
           <div style={{ fontSize: 13, color: '#475569', margin: '4px 0 10px' }}>
-            Installs Docker on the VM through the CloudShare API and starts DVWA, Juice Shop, WebGoat and the nginx TLS front door (ports {PORT_LIST}). Takes a few minutes while the images download.
+            Installs Docker on the VM through the CloudShare API and starts DVWA, Juice Shop, WebGoat, Apache httpd 2.4.49, Tomcat 8.5, WordPress 4.9 and the nginx TLS front door (ports {PORT_LIST}). The VM needs about 8 GB RAM. Takes a few minutes while the images download.
           </div>
           {data.csTestVmNetOk === false && runState === 'idle' && (
             <div className="alert alert-error" style={{ marginBottom: 10 }}>
@@ -236,7 +239,7 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
 
       {privateIp && (
         <div className="alert alert-success" style={{ marginTop: 12 }}>
-          <span>✅ <strong>Test apps at {privateIp}.</strong> Next, Publish puts all six endpoints behind ZPA (ports {PORT_LIST}).</span>
+          <span>✅ <strong>Test apps at {privateIp}.</strong> Next, Publish puts all nine endpoints behind ZPA (ports {PORT_LIST}).</span>
         </div>
       )}
 

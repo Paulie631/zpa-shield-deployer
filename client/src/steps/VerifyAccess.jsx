@@ -272,7 +272,7 @@ export default function VerifyAccess({ data, update, next, back }) {
       {/* C */}
       <div style={box}>
         <strong>3. Check it yourself</strong>
-        <div className="hint">On any device with Client Connector signed in to this tenant — the test VM above, or your own laptop — open <code>http://{ip || '…'}</code> (DVWA login page) and <code>http://{ip || '…'}:3000</code> (Juice Shop). Those two prove the path; the other endpoints (<code>https://{ip || '…'}</code>, <code>:8080</code>, <code>:8443</code>, <code>:8081</code> WebGoat) use the same rule. The TLS ones use a self-signed certificate, so expect a browser warning.</div>
+        <div className="hint">On any device with Client Connector signed in to this tenant — the test VM above, or your own laptop — open <code>http://{ip || '…'}</code> (DVWA login page) and <code>http://{ip || '…'}:3000</code> (Juice Shop). Those two prove the path; the other endpoints (<code>https://{ip || '…'}</code>, <code>:8080</code>, <code>:8443</code>, <code>:8081</code> WebGoat, <code>:8082</code> httpd, <code>:8083</code> Tomcat, <code>:8084</code> WordPress) use the same rule. The TLS ones use a self-signed certificate, so expect a browser warning.</div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <button className={`btn ${manual === 'works' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setManualResult('works')}>✅ The apps load</button>
           <button className={`btn ${manual === 'fails' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setManualResult('fails')}>❌ They don’t load</button>

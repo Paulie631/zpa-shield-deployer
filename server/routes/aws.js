@@ -88,7 +88,7 @@ async function vpcCidr(ec2, vpcId) {
 // Network paths the scan needs inside the VPC:
 //   test apps  <- the test-app ports from the VPC (scanner + App Connectors reach apps directly)
 //   scanner    -> anything in the VPC (it probes the apps' ports)
-const { TEST_APPS, TEST_APP_PORTS } = require('../lib/testApps');
+const { TEST_APPS, TEST_APP_PORTS, TEST_APPS_INSTANCE_TYPE } = require('../lib/testApps');
 function testAppsIngress(cidr) {
   return TEST_APP_PORTS.map(p => ({ IpProtocol: 'tcp', FromPort: p, ToPort: p, CidrIp: cidr, Description: `Test app port ${p} from the VPC` }));
 }
@@ -267,7 +267,7 @@ router.post('/deploy-test-apps', async (req, res) => {
           Type: 'AWS::EC2::Instance',
           Properties: {
             ImageId: imageId,
-            InstanceType: instanceType || 't3.medium',
+            InstanceType: instanceType || TEST_APPS_INSTANCE_TYPE,
             ...(keyPairName ? { KeyName: keyPairName } : {}),
             SubnetId: subnetId,
             SecurityGroupIds: [{ Ref: 'TestAppsSecurityGroup' }],
