@@ -9,8 +9,8 @@ const FILE = path.join(os.homedir(), '.zpa-shield', 'timings.json');
 
 // seconds: { typical, max } — "typical" is what we show, "max" is when we start calling it slow
 const SEED = {
-  'testapps.core':      { typical: 240, max: 480,  label: 'DVWA / Juice Shop answering after launch' },
-  'testapps.all':       { typical: 420, max: 720,  label: 'all test endpoints answering (Tomcat, WordPress last)' },
+  'testapps.core':      { typical: 150, max: 420,  label: 'DVWA / Juice Shop answering after launch' },
+  'testapps.all':       { typical: 300, max: 660,  label: 'all test endpoints answering (Tomcat, WordPress last)' },
   'connector.enrol':    { typical: 240, max: 600,  label: 'App Connector enrolled and online' },
   'connector.upgrade':  { typical: 300, max: 900,  label: 'connector back online after a version-profile upgrade' },
   'scan.pickup':        { typical: 120, max: 900,  label: 'scan moves from Requested to In Progress' },
