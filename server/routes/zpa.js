@@ -354,12 +354,18 @@ router.post('/prepare-scanner', async (req, res) => {
 
     stage = 'checking the scanner connector';
     const conns = await listConnectors(base, headers);
-    const scanners = conns.filter(c => String(c.appConnectorGroupId) === String(scannerGroupId));
+    // Match by group id, by group name (the list sometimes carries only the name), and as a
+    // last resort by the wizard's own connector naming — the stored id can go stale.
+    let groupName = '';
+    try { groupName = (await axios.get(`${base}/appConnectorGroup/${scannerGroupId}`, { headers, timeout: 15000 })).data?.name || ''; } catch { /* fall through */ }
+    const inGroup = (c) => String(c.appConnectorGroupId) === String(scannerGroupId) || (groupName && c.appConnectorGroupName === groupName);
+    let scanners = conns.filter(inGroup);
+    if (!scanners.length) scanners = conns.filter(c => /appscanner/i.test(c.name || ''));
     const online = (s = '') => /AUTHENTICATED|ONLINE/i.test(s) || (/CONNECTED/i.test(s) && !/DISCONNECTED/i.test(s));
     checks.push({
       id: 'online', ok: scanners.some(c => online(c.controlChannelStatus)), label: 'App Scanner connector online',
       detail: scanners.length ? scanners.map(c => `${c.name}: ${c.controlChannelStatus || 'unknown'}${c.currentVersion ? ' · ' + c.currentVersion : ''}`).join('; ')
-        : 'No connector has enrolled in the scanner group yet (5–10 minutes after the VM starts; it may also restart once to upgrade).',
+        : `No connector has enrolled in the scanner group${groupName ? ` "${groupName}"` : ''} yet (5–10 minutes after the VM starts; it may also restart once to upgrade). Connectors seen: ${conns.map(c => `${c.name} [${c.appConnectorGroupName || c.appConnectorGroupId || '?'}]`).join(', ') || 'none'}.`,
     });
 
     stage = 'turning on Application Shield Scanning';
