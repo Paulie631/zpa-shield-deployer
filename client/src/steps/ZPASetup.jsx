@@ -298,7 +298,7 @@ export default function ZPASetup({ data, update, next, back }) {
           onChange={e => setCustomerIdInput(e.target.value.trim())}
           onBlur={e => { const v = e.target.value.trim(); setCustomerIdInput(v); setCustomerId(v); if (v) loadAll(v); }}
         />
-        <div className="hint">The numeric ZPA tenant ID (digits only) — <strong>not</strong> the Zidentity tenant ID. Entered on the ZPA Login step; change it here only if that was wrong (Experience Center: Private Access → Client Credentials).</div>
+        <div className="hint">The numeric ZPA tenant ID (digits only) — <strong>not</strong> the Zidentity tenant ID. Entered on the ZPA Login step; change it here only if that was wrong (Experience Center: Administration → Administration → Private Access Tenant → ZPA tenant ID).</div>
         {customerIdInput && !/^\d+$/.test(customerIdInput) && (
           <div className="hint" style={{ color: '#dc2626' }}>This doesn’t look like a ZPA Customer ID — it should be digits only.</div>
         )}

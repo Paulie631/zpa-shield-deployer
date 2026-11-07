@@ -33,11 +33,11 @@ const GUIDES = {
   oneapi: {
     title: 'Where to find your OneAPI credentials',
     steps: [
-      'Go to console.zscaler.com and log in as an admin',
-      'Open Private Access → Client Credentials (console.zscaler.com/private/client-credentials) — the OneAPI client lives here in Experience Center',
-      'Click Add Client, set grant type to Client Credentials, copy the Client ID and Secret',
-      'Your Vanity Domain is shown on the client details page — it is the prefix before .zslogin.net (e.g. "acme" from acme.zslogin.net)',
-      'Pick the Cloud Environment (above) that matches your ZPA tenant, and copy the numeric ZPA Customer ID shown on the same page',
+      'Go to console.zscaler.com (Experience Center) and log in as an admin',
+      'API client: Administration → API → OneAPI → API Clients → Add. Give it the ZPA resource (Administration → API → API Resources lists what it can reach) and copy the Client ID and Secret — the secret is shown once',
+      'Vanity Domain: the prefix of your admin login URL before .zslogin.net (e.g. "acme" from acme.zslogin.net); it is also shown on the API client page',
+      'ZPA Customer ID: Administration → Administration → Private Access Tenant (console.zscaler.com/private/company) → the "ZPA tenant ID" field — digits only',
+      'Cloud Environment (above): match the cloud in your ZPA tenant name/URL (e.g. zscalertwo.net → Zscaler Two)',
     ],
     docsUrl: 'https://automate.zscaler.com/docs/getting-started/getting-started'
   }
@@ -317,7 +317,7 @@ export default function ZPACredentials({ data, update, next }) {
           <label>ZPA Customer ID <span className="label-required">*</span></label>
           <input type="text" inputMode="numeric" placeholder="e.g. 216196257331281920" value={customerId}
             onChange={e => { setCustomerId(e.target.value.trim()); setError('') }} autoComplete="off" spellCheck={false} />
-          <div className="hint">The numeric ZPA tenant ID (digits only) — <strong>not</strong> the Zidentity tenant UUID. Experience Center: <strong>Private Access → Client Credentials</strong>, shown next to your API client; legacy ZPA Admin Portal: Configuration &amp; Control → Public API → API Keys. Asked once; later steps reuse it.</div>
+          <div className="hint">The numeric ZPA tenant ID (digits only) — <strong>not</strong> the Zidentity tenant UUID. Experience Center: <strong>Administration → Administration → Private Access Tenant</strong> → “ZPA tenant ID” (console.zscaler.com/private/company). Legacy ZPA Admin Portal: Configuration &amp; Control → Public API → API Keys. Asked once; later steps reuse it.</div>
           {customerId && !/^\d+$/.test(customerId) && <div className="hint" style={{ color: '#b45309' }}>Digits only — a value with letters or dashes is the Zidentity tenant ID, not the ZPA customer ID.</div>}
         </div>
       )}

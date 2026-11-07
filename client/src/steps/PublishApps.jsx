@@ -173,7 +173,7 @@ export default function PublishApps({ data, update, next, back }) {
         <div className="form-group">
           <label>ZPA Customer ID</label>
           <input value={cid} placeholder="e.g. 216196257331281920" onChange={e => setCustomerId(e.target.value.trim())} />
-          <div className="hint">The numeric ZPA tenant ID (Experience Center: Private Access → Client Credentials) — not the Zidentity tenant ID. Normally entered once on the ZPA Login step.</div>
+          <div className="hint">The numeric ZPA tenant ID (Experience Center: Administration → Administration → Private Access Tenant → ZPA tenant ID) — not the Zidentity tenant ID. Normally entered once on the ZPA Login step.</div>
         </div>
       )}
 

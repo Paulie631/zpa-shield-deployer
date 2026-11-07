@@ -32,7 +32,8 @@ A 9-step guided wizard that automates the full ZPA App Shield deployment:
 
 - Node.js 18+
 - npm 9+
-- A ZPA tenant with Autonomous Application Shield enabled
+- A ZPA tenant with Autonomous Application Shield enabled (Private Access shows an *Autonomous App Shield* menu)
+- In Experience Center (console.zscaler.com): a OneAPI client with the ZPA resource — **Administration → API → OneAPI → API Clients** — and the numeric ZPA tenant ID from **Administration → Administration → Private Access Tenant**
 - AWS account (for AWS path) with permissions to create EC2, CloudFormation, SSM, and IAM resources
 
 ---

@@ -85,13 +85,13 @@ function zpaError(err) {
   const raw = (d && (d.message || d.reason || d.exception || d.error)) || err.message || String(err);
   const st = err.response?.status;
   const id = d?.id ? ` [${d.id}]` : '';
-  if (st === 401) return `ZPA rejected the token (401${id}). The OneAPI client needs the ZPA resource with read/write scopes — Experience Center → Private Access → Client Credentials → your client. (${raw})`;
-  if (st === 403) return `ZPA says this API client isn't allowed to do that (403${id}). Add the ZPA resource/role to the OneAPI client in Private Access → Client Credentials. (${raw})`;
+  if (st === 401) return `ZPA rejected the token (401${id}). The OneAPI client needs the ZPA resource with read/write scopes — Experience Center → Administration → API → OneAPI → API Clients → your client (API Resources lists the scopes). (${raw})`;
+  if (st === 403) return `ZPA says this API client isn't allowed to do that (403${id}). Add the ZPA resource to the OneAPI client under Administration → API → OneAPI → API Clients. (${raw})`;
   if (/No handler found/i.test(raw)) return `ZPA has no API for this on your tenant (“${raw}”). Use the portal steps shown.`;
   if (/already exists.*within the last 12 hours/i.test(raw)) return `${raw} — ZPA allows one scan request per app segment per 12 hours, and an earlier request is still pending. Wait it out, or scan the same VM through a new segment that uses its private DNS name.`;
   if (/already exists/i.test(raw)) return `${raw} — an object with that name already exists in ZPA; the wizard normally reuses it, so click the retry/“Check again” button.`;
   if (/Invalid operand/i.test(raw)) return `ZPA rejected a search filter (${raw}). This is a wizard bug — please report it; in the meantime the object can be picked by hand in the portal.`;
-  if (/bad\.request/i.test(raw) && /customers\//.test(err.config?.url || '')) return `ZPA returned bad.request. The usual cause is a wrong ZPA Customer ID (it must be the numeric ZPA tenant ID, not the Zidentity UUID) — check it on the ZPA Login step. (${raw})`;
+  if (/bad\.request/i.test(raw) && /customers\//.test(err.config?.url || '')) return `ZPA returned bad.request. The usual cause is a wrong ZPA Customer ID (it must be the numeric ZPA tenant ID, not the Zidentity UUID) — check it on the ZPA Login step (Experience Center: Administration → Administration → Private Access Tenant → ZPA tenant ID). (${raw})`;
   if (/ENOTFOUND|EAI_AGAIN/.test(raw)) return `This Mac can't resolve ${err.hostname || 'the Zscaler API host'} (${raw}). Check its network/VPN/Client Connector, then retry.`;
   if (st >= 500) return `Zscaler's API returned ${st} (${raw}). Usually transient — retry in a minute.`;
   return raw;
