@@ -90,6 +90,7 @@ function zpaError(err) {
   if (/No handler found/i.test(raw)) return `ZPA has no API for this on your tenant (“${raw}”). Use the portal steps shown.`;
   if (/already exists.*within the last 12 hours/i.test(raw)) return `${raw} — ZPA allows one scan request per app segment per 12 hours, and an earlier request is still pending. Wait it out, or scan the same VM through a new segment that uses its private DNS name.`;
   if (/already exists/i.test(raw)) return `${raw} — an object with that name already exists in ZPA; the wizard normally reuses it, so click the retry/“Check again” button.`;
+  if (/special characters other than periods/i.test(raw)) return `ZPA only allows letters, digits, spaces, periods, hyphens and underscores in names (${raw}). This is a wizard bug if you didn't type the name — please report it.`;
   if (/Invalid operand/i.test(raw)) return `ZPA rejected a search filter (${raw}). This is a wizard bug — please report it; in the meantime the object can be picked by hand in the portal.`;
   if (/bad\.request/i.test(raw) && /customers\//.test(err.config?.url || '')) return `ZPA returned bad.request. The usual cause is a wrong ZPA Customer ID (it must be the numeric ZPA tenant ID, not the Zidentity UUID) — check it on the ZPA Login step (Experience Center: Administration → Administration → Private Access Tenant → ZPA tenant ID). (${raw})`;
   if (/ENOTFOUND|EAI_AGAIN/.test(raw)) return `This Mac can't resolve ${err.hostname || 'the Zscaler API host'} (${raw}). Check its network/VPN/Client Connector, then retry.`;

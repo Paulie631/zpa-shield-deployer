@@ -128,10 +128,10 @@ The wizard deploys three OWASP training apps and three old mainstream servers on
 | Segment | Port | What's behind it |
 |---------|------|------------------|
 | ZPA Shield - DVWA | 80 | [DVWA](https://github.com/digininja/DVWA) on a dated Apache/PHP image |
-| ZPA Shield - DVWA (TLS) | 443 | nginx 1.18 (TLS 1.0–1.2, self-signed) → DVWA |
+| ZPA Shield - DVWA-TLS | 443 | nginx 1.18 (TLS 1.0–1.2, self-signed) → DVWA |
 | ZPA Shield - Juice Shop | 3000 | [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) v13.3.0 (2022) |
-| ZPA Shield - Juice Shop (HTTP 8080) | 8080 | nginx → Juice Shop on a standard web port (avoids the “ppp” fingerprint on 3000) |
-| ZPA Shield - Juice Shop (TLS) | 8443 | nginx TLS → Juice Shop |
+| ZPA Shield - Juice Shop-8080 | 8080 | nginx → Juice Shop on a standard web port (avoids the “ppp” fingerprint on 3000) |
+| ZPA Shield - Juice Shop-TLS | 8443 | nginx TLS → Juice Shop |
 | ZPA Shield - WebGoat | 8081 | [OWASP WebGoat](https://github.com/WebGoat/WebGoat) v2023.4 — a Java/Spring stack |
 | ZPA Shield - Apache httpd 2.4.49 | 8082 | Official `httpd:2.4.49` image — a release with a well-known 2021 CVE that App Shield's own check confirms |
 | ZPA Shield - Tomcat 8.5 | 8083 | `tomcat:8.5.0-jre8` — Java server fingerprint with a long version-CVE list |

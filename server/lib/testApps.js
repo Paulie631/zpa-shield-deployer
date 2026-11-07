@@ -6,10 +6,10 @@
 // keeps ZPA's one-scan-request-per-segment lock from blocking everything at once.
 const TEST_APPS = [
   { key: 'dvwa',        name: 'ZPA Shield - DVWA',                  port: 80,   scheme: 'http',  app: 'DVWA',       via: 'direct' },
-  { key: 'dvwa-tls',    name: 'ZPA Shield - DVWA (TLS)',            port: 443,  scheme: 'https', app: 'DVWA',       via: 'nginx' },
+  { key: 'dvwa-tls',    name: 'ZPA Shield - DVWA-TLS',            port: 443,  scheme: 'https', app: 'DVWA',       via: 'nginx' },
   { key: 'juice',       name: 'ZPA Shield - Juice Shop',            port: 3000, scheme: 'http',  app: 'Juice Shop', via: 'direct' },
-  { key: 'juice-8080',  name: 'ZPA Shield - Juice Shop (HTTP 8080)', port: 8080, scheme: 'http',  app: 'Juice Shop', via: 'nginx' },
-  { key: 'juice-tls',   name: 'ZPA Shield - Juice Shop (TLS)',      port: 8443, scheme: 'https', app: 'Juice Shop', via: 'nginx' },
+  { key: 'juice-8080',  name: 'ZPA Shield - Juice Shop-8080', port: 8080, scheme: 'http',  app: 'Juice Shop', via: 'nginx' },
+  { key: 'juice-tls',   name: 'ZPA Shield - Juice Shop-TLS',      port: 8443, scheme: 'https', app: 'Juice Shop', via: 'nginx' },
   { key: 'webgoat',     name: 'ZPA Shield - WebGoat',               port: 8081, scheme: 'http',  app: 'WebGoat',    via: 'direct' },
   // Old mainstream server software: version-based CVE matching and exploit confirmation have real material here
   { key: 'httpd',       name: 'ZPA Shield - Apache httpd 2.4.49',   port: 8082, scheme: 'http',  app: 'Apache httpd', via: 'direct' },
