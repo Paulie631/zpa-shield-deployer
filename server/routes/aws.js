@@ -435,8 +435,15 @@ router.post('/probe-test-apps', async (req, res) => {
         endpoints: TEST_APPS.map(a => ({ ...a, url: `${a.scheme}://${ip}${(a.scheme==='http'&&a.port===80)||(a.scheme==='https'&&a.port===443)?'':':'+a.port}/`, code: null, ok: null })) });
     }
     const curls = TEST_APPS.map(a => `echo "EP ${a.key} $(curl -sk -o /dev/null -m 6 -w '%{http_code}' ${a.scheme}://${ip}:${a.port}/ || echo 000)"`);
-    const local = prober && proberName === 'test apps VM' ? ['echo "DOCKER $(docker ps -a --format \'{{.Names}}={{.Status}}\' 2>/dev/null | tr \'\\n\' \';\')"', 'echo "MEM $(free -m | awk \'/Mem:/{print $3\"/\"$2}\')"'] : [];
-    const out = await runShell(ssm, prober, [...curls, ...local], { timeoutMs: 90000, comment: 'zpa-shield probe' });
+    const localCmds = ['echo "DOCKER $(docker ps -a --format \'{{.Names}}={{.Status}}\' 2>/dev/null | tr \'\\n\' \';\')"', 'echo "MEM $(free -m | awk \'/Mem:/{print $3\"/\"$2}\')"',
+      'echo "WARNINGS_BEGIN"; grep -h "WARNING\\|SCRIPT FAILED" /var/log/zpa-shield-status.log /var/log/zpa-shield-testapps.log /var/log/cloud-init-output.log 2>/dev/null | sort -u | tail -n 12; echo "WARNINGS_END"',
+      'echo "LASTLINE $(grep -h "===\\|Test apps ready" /var/log/zpa-shield-testapps.log /var/log/cloud-init-output.log 2>/dev/null | tail -n 1)"'];
+    let out = await runShell(ssm, prober, [...curls, ...(proberName === 'test apps VM' ? localCmds : [])], { timeoutMs: 90000, comment: 'zpa-shield probe' });
+    // Probing from the scanner but the apps VM is also managed: fetch its container state too.
+    if (proberName !== 'test apps VM' && apps.instanceId && (await isManaged(ssm, apps.instanceId).catch(() => ({}))).managed) {
+      const o2 = await runShell(ssm, apps.instanceId, localCmds, { timeoutMs: 60000, comment: 'zpa-shield apps state' }).catch(() => null);
+      if (o2) out = { ...out, stdout: out.stdout + '\n' + o2.stdout };
+    }
     const codes = Object.fromEntries([...out.stdout.matchAll(/^EP (\S+) (\d{3})$/gm)].map(m => [m[1], m[2]]));
     const endpoints = TEST_APPS.map(a => {
       const code = codes[a.key] || '000';
@@ -446,12 +453,14 @@ router.post('/probe-test-apps', async (req, res) => {
     });
     const docker = (out.stdout.match(/^DOCKER (.*)$/m) || [])[1] || '';
     const mem = (out.stdout.match(/^MEM (.*)$/m) || [])[1] || '';
+    const warnings = ((out.stdout.match(/WARNINGS_BEGIN\n([\s\S]*?)WARNINGS_END/) || [])[1] || '').split('\n').map(s => s.trim()).filter(Boolean);
+    const scriptPhase = (out.stdout.match(/^LASTLINE (.*)$/m) || [])[1]?.replace(/=/g, '').trim() || '';
     const core = endpoints.filter(e => e.key === 'dvwa' || e.key === 'juice');
     const allUp = endpoints.every(e => e.ok), coreUp = core.every(e => e.ok);
     if (allUp && ageSeconds) timings.record('testapps.all', ageSeconds);
     else if (coreUp && ageSeconds) timings.record('testapps.core', ageSeconds);
     if (allUp && req.body.notify) notify('ZPA Shield Deployer', `All ${endpoints.length} test endpoints are answering at ${ip}`);
-    res.json({ ok: true, probedFrom: proberName, endpoints, docker, mem, ageSeconds, allUp, coreUp, estimate: est, estimateCore: estCore,
+    res.json({ ok: true, probedFrom: proberName, endpoints, docker, mem, warnings, scriptPhase, ageSeconds, allUp, coreUp, estimate: est, estimateCore: estCore,
       slow: ageSeconds && !allUp && ageSeconds > est.max });
   } catch (err) { res.status(400).json({ error: err.code === 'NOT_MANAGED' ? err.message : credentialError(err) }); }
 });
@@ -470,7 +479,7 @@ router.post('/rerun-test-apps', async (req, res) => {
     const b64 = Buffer.from(script).toString('base64');
     const out = await runShell(ssm, st.instanceId, [
       `echo ${b64} | base64 -d > /opt/zpa-shield-testapps.sh`, 'chmod +x /opt/zpa-shield-testapps.sh',
-      'nohup bash /opt/zpa-shield-testapps.sh > /var/log/zpa-shield-testapps.log 2>&1 &', 'echo started',
+      'nohup bash /opt/zpa-shield-testapps.sh > /dev/null 2>&1 &', 'echo started', // the script tees itself to /var/log/zpa-shield-testapps.log
     ], { timeoutMs: 30000, comment: 'zpa-shield rerun apps' });
     res.json({ started: /started/.test(out.stdout), instanceId: st.instanceId, privateIp: st.privateIp, log: '/var/log/zpa-shield-testapps.log' });
   } catch (err) { res.status(400).json({ error: err.code === 'NOT_MANAGED' ? err.message : credentialError(err) }); }

@@ -308,8 +308,16 @@ function EndpointReadiness({ data, ip }) {
           {r.endpoints.map(e => <div key={e.key}>{dot(e.ok)} <code>{e.url}</code> <span className="hint">{e.ok ? `HTTP ${e.code}` : e.code === '000' ? 'not answering yet' : e.code == null ? 'not probed' : `HTTP ${e.code}`}</span></div>)}
         </div>
       )}
-      {r?.docker && <div className="hint" style={{ marginTop: 6 }}>Containers: {r.docker.split(';').filter(Boolean).join(' · ')}{r.mem ? ` · memory ${r.mem} MB` : ''}</div>}
-      {r && r.ok && !r.allUp && r.coreUp && <div className="hint" style={{ marginTop: 6 }}>DVWA and Juice Shop are up — enough to continue to Publish. Tomcat and WordPress are usually the last to answer (allow up to {fmt(est.max)} after launch); if an endpoint is still red after that, the container probably failed: EC2 → the instance → Connect → Session Manager → <code>sudo docker ps -a</code>.</div>}
+      {r?.docker && <div className="hint" style={{ marginTop: 6 }}>Containers: {r.docker.split(';').filter(Boolean).join(' · ')}{r.mem ? ` · memory ${r.mem} MB` : ''}{r.scriptPhase ? ` · script: ${r.scriptPhase}` : ''}</div>}
+      {r?.warnings?.length > 0 && (
+        <div className="alert alert-warning" style={{ marginTop: 6, display: 'block' }}>
+          <strong>The apps script reported problems on the VM:</strong>
+          <ul style={{ margin: '4px 0 4px 18px' }}>{r.warnings.map((w, i) => <li key={i}><code style={{ fontSize: 12 }}>{w}</code></li>)}</ul>
+          {r.warnings.some(w => /SCRIPT FAILED/.test(w)) && <div>An older version of the script stopped at the first error, so every app after that line never started. Click <strong>Deploy Test Apps</strong> again — the current script re-runs on this instance, tries fallback images and keeps going past a failed container.</div>}
+          {r.warnings.some(w => /did not start/.test(w)) && !r.warnings.some(w => /SCRIPT FAILED/.test(w)) && <div>Those apps are skipped; everything else runs. Their segments will simply have nothing to scan — you can delete them on the Scan step, or check the image tags in <code>server/lib/testApps.js</code>.</div>}
+        </div>
+      )}
+      {r && r.ok && !r.allUp && r.coreUp && !(r.warnings?.length > 0) && <div className="hint" style={{ marginTop: 6 }}>DVWA and Juice Shop are up — enough to continue to Publish. Tomcat and WordPress are usually the last to answer (allow up to {fmt(est.max)} after launch); if an endpoint is still red after that, the container probably failed: EC2 → the instance → Connect → Session Manager → <code>sudo docker ps -a</code>.</div>}
       {r && r.ok && r.allUp && <div className="hint" style={{ marginTop: 6 }}>✅ All {r.endpoints.length} endpoints answer from inside the VPC — the scanner can reach every one.</div>}
     </div>
   )

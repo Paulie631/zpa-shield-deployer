@@ -30,9 +30,21 @@ const IMAGES = {
   wordpress: 'wordpress:4.9.0-php7.0-apache', // dated CMS on old PHP; large Nuclei template family
   mysql: 'mysql:5.7',                     // backing store for WordPress (not exposed)
 };
+// If a pinned tag can't be pulled (removed from Docker Hub, registry hiccup), the script falls back
+// down this list rather than aborting — a missing Tomcat must never take WebGoat and WordPress down with it.
+const IMAGE_FALLBACKS = {
+  tomcat: [IMAGES.tomcat, 'tomcat:8.5.0-jre8', 'tomcat:8.5-jre8', 'tomcat:8.5'],
+  wordpress: [IMAGES.wordpress, 'wordpress:4.9-php7.0-apache', 'wordpress:4.9', 'wordpress:5.0'],
+  webgoat: [IMAGES.webgoat, 'webgoat/webgoat:latest'],
+  httpd: [IMAGES.httpd, 'httpd:2.4.50', 'httpd:2.4'],
+  juice: [IMAGES.juice, 'bkimminich/juice-shop:latest'],
+  dvwa: [IMAGES.dvwa],
+  nginx: [IMAGES.nginx, 'nginx:1.18', 'nginx:stable'],
+  mysql: [IMAGES.mysql, 'mysql:5.7.44', 'mariadb:10.6'],
+};
 // Memory the test-apps VM needs with everything running (Tomcat + WordPress/MySQL push it past 4 GB)
 const TEST_APPS_INSTANCE_TYPE = 't3.large';
 
 const urlFor = (ip, a) => `${a.scheme}://${ip}${(a.scheme === 'http' && a.port === 80) || (a.scheme === 'https' && a.port === 443) ? '' : ':' + a.port}/`;
 
-module.exports = { TEST_APPS, TEST_APP_PORTS, IMAGES, TEST_APPS_INSTANCE_TYPE, urlFor };
+module.exports = { TEST_APPS, TEST_APP_PORTS, IMAGES, IMAGE_FALLBACKS, TEST_APPS_INSTANCE_TYPE, urlFor };
