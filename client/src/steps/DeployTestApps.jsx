@@ -320,9 +320,9 @@ function EndpointReadiness({ data, ip, update }) {
         </div>
       )}
       {r?.docker && <div className="hint" style={{ marginTop: 6 }}>Containers: {r.docker.split(';').filter(Boolean).join(' · ')}{r.mem ? ` · memory ${r.mem} MB` : ''}</div>}
-      {r?.ok && r.scriptPhase && <div className="hint" style={{ marginTop: 4 }}>Apps script on the VM: <strong>{r.scriptPhase}</strong>{!r.docker ? ' — no containers created yet' : ''}</div>}
+      {r?.ok && !r.allUp && r.scriptPhase && <div className="hint" style={{ marginTop: 4 }}>Apps script on the VM: <strong>{r.scriptPhase}</strong>{!r.docker ? ' — no containers created yet' : ''}</div>}
       {r?.ok && !r.scriptPhase && !r.docker && r.probedFrom === 'test apps VM' && <div className="hint" style={{ marginTop: 4 }}>The apps script hasn’t written anything yet — on first boot it starts about a minute after the instance is reachable. If this persists past {fmt(est.typical)}, open Session Manager on the instance and run <code>sudo tail -n 40 /var/log/cloud-init-output.log</code>.</div>}
-      {r?.warnings?.length > 0 && (
+      {r?.warnings?.length > 0 && !r.allUp && (
         <div className="alert alert-warning" style={{ marginTop: 6, display: 'block' }}>
           <strong>The apps script reported problems on the VM:</strong>
           <ul style={{ margin: '4px 0 4px 18px' }}>{r.warnings.map((w, i) => <li key={i}><code style={{ fontSize: 12 }}>{w}</code></li>)}</ul>
