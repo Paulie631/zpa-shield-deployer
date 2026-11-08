@@ -322,7 +322,8 @@ router.post('/deploy-test-apps', async (req, res) => {
         const m = st.instanceId ? await isManaged(ssm, st.instanceId) : { managed: false, pingStatus: 'NoInstance' };
         if (m.managed) {
           const b64 = Buffer.from(generateTestAppsScript()).toString('base64');
-          await runShell(ssm, st.instanceId, [`echo ${b64} | base64 -d > /opt/zpa-shield-testapps.sh`, 'chmod +x /opt/zpa-shield-testapps.sh', 'nohup bash /opt/zpa-shield-testapps.sh > /var/log/zpa-shield-testapps.log 2>&1 &', 'echo started'], { timeoutMs: 30000, comment: 'zpa-shield rerun apps' });
+          await runShell(ssm, st.instanceId, ['pkill -f "bash /opt/zpa-shield-testapps.sh" || true', 'pkill -f "/var/lib/cloud/instance/scripts/" || true', // stop any earlier copy (e.g. a hung 1.8.4 first-boot run)
+      `echo ${b64} | base64 -d > /opt/zpa-shield-testapps.sh`, 'chmod +x /opt/zpa-shield-testapps.sh', 'nohup bash /opt/zpa-shield-testapps.sh > /var/log/zpa-shield-testapps.log 2>&1 &', 'echo started'], { timeoutMs: 30000, comment: 'zpa-shield rerun apps' });
           rerun = { started: true, message: 'Existing stack kept; the apps script is re-running on the instance through Systems Manager so any new endpoints start. Allow 5–8 minutes.' };
         } else {
           rerun = { started: false, needsRecreate: true, message: `Existing stack kept, but its instance isn’t reachable through Systems Manager (${m.pingStatus}) — it was created before the wizard added an SSM role — so the apps script can’t be re-run and new endpoints will NOT start. To get them: delete the ${finalStackName} stack (CloudFormation, or Done → Tear Down) and click Deploy again; the new instance starts everything on first boot. Then re-run Publish because the IP changes.` };
@@ -478,6 +479,7 @@ router.post('/rerun-test-apps', async (req, res) => {
     const script = generateTestAppsScript();
     const b64 = Buffer.from(script).toString('base64');
     const out = await runShell(ssm, st.instanceId, [
+      'pkill -f "bash /opt/zpa-shield-testapps.sh" || true', 'pkill -f "/var/lib/cloud/instance/scripts/" || true', // stop any earlier copy (e.g. a hung 1.8.4 first-boot run)
       `echo ${b64} | base64 -d > /opt/zpa-shield-testapps.sh`, 'chmod +x /opt/zpa-shield-testapps.sh',
       'nohup bash /opt/zpa-shield-testapps.sh > /dev/null 2>&1 &', 'echo started', // the script tees itself to /var/log/zpa-shield-testapps.log
     ], { timeoutMs: 30000, comment: 'zpa-shield rerun apps' });
