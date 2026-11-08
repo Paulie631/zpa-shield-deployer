@@ -33,7 +33,7 @@ const IMAGES = {
 // If a pinned tag can't be pulled (removed from Docker Hub, registry hiccup), the script falls back
 // down this list rather than aborting — a missing Tomcat must never take WebGoat and WordPress down with it.
 const IMAGE_FALLBACKS = {
-  tomcat: [IMAGES.tomcat, 'tomcat:8.5.0-jre8', 'tomcat:8.5-jre8', 'tomcat:8.5'],
+  tomcat: [IMAGES.tomcat, 'tomcat:8.5.100-jre8', 'tomcat:8.5-jre8', 'tomcat:8.5.100', 'tomcat:8.5'], // newer builds unpack on any Docker store
   wordpress: [IMAGES.wordpress, 'wordpress:4.9-php7.0-apache', 'wordpress:4.9', 'wordpress:5.0'],
   webgoat: [IMAGES.webgoat, 'webgoat/webgoat:latest'],
   httpd: [IMAGES.httpd, 'httpd:2.4.50', 'httpd:2.4'],
