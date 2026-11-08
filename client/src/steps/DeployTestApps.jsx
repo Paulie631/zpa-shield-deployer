@@ -247,7 +247,7 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
         </div>
       )}
 
-      {privateIp && isAWS && <EndpointReadiness data={data} ip={privateIp} />}
+      {privateIp && isAWS && <EndpointReadiness data={data} ip={privateIp} update={update} />}
 
       {privateIp && (
         <div className="alert alert-success" style={{ marginTop: 12 }}>
@@ -286,7 +286,7 @@ sudo docker run -d --restart unless-stopped --name juiceshop -p 3000:3000 bkimmi
 
 // Which of the test endpoints answer, probed from inside the VPC (the App Scanner or the test-apps
 // VM, over Systems Manager). Doesn't block Continue; polls every 30s until all answer.
-function EndpointReadiness({ data, ip }) {
+function EndpointReadiness({ data, ip, update }) {
   const startedAt = data.testAppsLaunchedAt
   const poll = usePoll(
     async () => (await axios.post('/api/aws/probe-test-apps', { ...awsAuth(data), ip, launchedAt: startedAt, notify: true })).data,
@@ -294,6 +294,17 @@ function EndpointReadiness({ data, ip }) {
   )
   const r = poll.result
   const est = r?.estimate || { typical: 420, max: 720 }
+  const [rr, setRr] = useState({ busy: false, msg: null, err: null })
+  const rerunScript = async () => {
+    setRr({ busy: true, msg: null, err: null })
+    try {
+      const out = (await axios.post('/api/aws/rerun-test-apps', { ...awsAuth(data) })).data
+      setRr({ busy: false, msg: `Re-running the apps script on ${out.instanceId}. Containers usually answer within 1–3 minutes (images already on the VM). Log on the VM: ${out.log}`, err: null })
+      update?.({ testAppsLaunchedAt: new Date().toISOString() })
+      setTimeout(poll.refresh, 20000)
+    } catch (e) { setRr({ busy: false, msg: null, err: e.response?.data?.error || e.message }) }
+  }
+  const showRerun = r?.ok && !r.allUp
   return (
     <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, marginTop: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -309,7 +320,7 @@ function EndpointReadiness({ data, ip }) {
         </div>
       )}
       {r?.docker && <div className="hint" style={{ marginTop: 6 }}>Containers: {r.docker.split(';').filter(Boolean).join(' · ')}{r.mem ? ` · memory ${r.mem} MB` : ''}</div>}
-      {r?.ok && r.scriptPhase && <div className="hint" style={{ marginTop: 4 }}>Apps script on the VM: <strong>{r.scriptPhase}</strong>{!r.docker ? ' — Docker isn’t running yet, so no containers to show' : ''}</div>}
+      {r?.ok && r.scriptPhase && <div className="hint" style={{ marginTop: 4 }}>Apps script on the VM: <strong>{r.scriptPhase}</strong>{!r.docker ? ' — no containers created yet' : ''}</div>}
       {r?.ok && !r.scriptPhase && !r.docker && r.probedFrom === 'test apps VM' && <div className="hint" style={{ marginTop: 4 }}>The apps script hasn’t written anything yet — on first boot it starts about a minute after the instance is reachable. If this persists past {fmt(est.typical)}, open Session Manager on the instance and run <code>sudo tail -n 40 /var/log/cloud-init-output.log</code>.</div>}
       {r?.warnings?.length > 0 && (
         <div className="alert alert-warning" style={{ marginTop: 6, display: 'block' }}>
@@ -320,6 +331,14 @@ function EndpointReadiness({ data, ip }) {
         </div>
       )}
       {r && r.ok && !r.allUp && r.coreUp && !(r.warnings?.length > 0) && <div className="hint" style={{ marginTop: 6 }}>DVWA and Juice Shop are up — enough to continue to Publish. Tomcat and WordPress are usually the last to answer (allow up to {fmt(est.max)} after launch); if an endpoint is still red after that, the container probably failed: EC2 → the instance → Connect → Session Manager → <code>sudo docker ps -a</code>.</div>}
+      {showRerun && (
+        <div style={{ marginTop: 8 }}>
+          <button onClick={rerunScript} disabled={rr.busy} style={{ fontSize: 13 }}>{rr.busy ? <span className="spinner spinner-blue" /> : '⟳ Re-run apps script on this instance'}</button>
+          <span className="hint" style={{ marginLeft: 8 }}>Safe to repeat: stops any earlier run, recreates the containers, keeps the IP (no need to redo Publish).</span>
+          {rr.msg && <div className="alert alert-info" style={{ marginTop: 6, display: 'block' }}>ℹ️ {rr.msg}</div>}
+          {rr.err && <div className="alert alert-error" style={{ marginTop: 6 }}><span>⚠️ {rr.err}</span></div>}
+        </div>
+      )}
       {r && r.ok && r.allUp && <div className="hint" style={{ marginTop: 6 }}>✅ All {r.endpoints.length} endpoints answer from inside the VPC — the scanner can reach every one.</div>}
     </div>
   )
